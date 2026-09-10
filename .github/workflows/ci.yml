@@ -1,0 +1,14 @@
+name: CPU correctness
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        sanitize: [OFF, ON]
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DVANTAGE_CUDA=OFF -DVANTAGE_OPENMP=OFF -DVANTAGE_SANITIZE=${{ matrix.sanitize }}
+      - run: cmake --build build --parallel 2
+      - run: ./scripts/run_tests.sh
+      - run: python3 -m compileall -q python examples benchmark scripts tests

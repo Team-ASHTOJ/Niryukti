@@ -1,0 +1,589 @@
+{
+  "name": "synthetic_refinery_blending",
+  "sense": "min",
+  "variables": [
+    {
+      "name": "flow_0_0_0",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_0_0_1",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_0_0_2",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_0_0_3",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_0_1_0",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_0_1_1",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_0_1_2",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_0_1_3",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_1_0_0",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_1_0_1",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_1_0_2",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_1_0_3",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_1_1_0",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_1_1_1",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_1_1_2",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_1_1_3",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_2_0_0",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_2_0_1",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_2_0_2",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_2_0_3",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_2_1_0",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_2_1_1",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_2_1_2",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_2_1_3",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_3_0_0",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_3_0_1",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_3_0_2",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_3_0_3",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_3_1_0",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_3_1_1",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_3_1_2",
+      "lb": 0,
+      "ub": 120
+    },
+    {
+      "name": "flow_3_1_3",
+      "lb": 0,
+      "ub": 120
+    }
+  ],
+  "objective": {
+    "linear": [
+      65.87885359691577,
+      58.816688177112,
+      53.48339197007157,
+      47.54642147629764,
+      65.87885359691577,
+      58.816688177112,
+      53.48339197007157,
+      47.54642147629764,
+      65.87885359691577,
+      58.816688177112,
+      53.48339197007157,
+      47.54642147629764,
+      65.87885359691577,
+      58.816688177112,
+      53.48339197007157,
+      47.54642147629764,
+      65.87885359691577,
+      58.816688177112,
+      53.48339197007157,
+      47.54642147629764,
+      65.87885359691577,
+      58.816688177112,
+      53.48339197007157,
+      47.54642147629764,
+      65.87885359691577,
+      58.816688177112,
+      53.48339197007157,
+      47.54642147629764,
+      65.87885359691577,
+      58.816688177112,
+      53.48339197007157,
+      47.54642147629764
+    ]
+  },
+  "constraints": [
+    {
+      "name": "demand_0_0",
+      "coefficients": {
+        "flow_0_0_0": 1,
+        "flow_0_0_1": 1,
+        "flow_0_0_2": 1,
+        "flow_0_0_3": 1
+      },
+      "lb": 80.0,
+      "ub": 80.0
+    },
+    {
+      "name": "sulfur_0_0",
+      "coefficients": {
+        "flow_0_0_0": -0.6000000000000001,
+        "flow_0_0_1": 0.2333333333333334,
+        "flow_0_0_2": 1.0666666666666667,
+        "flow_0_0_3": 1.9000000000000001
+      },
+      "lb": null,
+      "ub": 0
+    },
+    {
+      "name": "demand_0_1",
+      "coefficients": {
+        "flow_0_1_0": 1,
+        "flow_0_1_1": 1,
+        "flow_0_1_2": 1,
+        "flow_0_1_3": 1
+      },
+      "lb": 90.0,
+      "ub": 90.0
+    },
+    {
+      "name": "sulfur_0_1",
+      "coefficients": {
+        "flow_0_1_0": -0.8,
+        "flow_0_1_1": 0.03333333333333344,
+        "flow_0_1_2": 0.8666666666666667,
+        "flow_0_1_3": 1.7000000000000002
+      },
+      "lb": null,
+      "ub": 0
+    },
+    {
+      "name": "availability_0_0",
+      "coefficients": {
+        "flow_0_0_0": 1,
+        "flow_0_1_0": 1
+      },
+      "lb": null,
+      "ub": 240
+    },
+    {
+      "name": "availability_0_1",
+      "coefficients": {
+        "flow_0_0_1": 1,
+        "flow_0_1_1": 1
+      },
+      "lb": null,
+      "ub": 240
+    },
+    {
+      "name": "availability_0_2",
+      "coefficients": {
+        "flow_0_0_2": 1,
+        "flow_0_1_2": 1
+      },
+      "lb": null,
+      "ub": 240
+    },
+    {
+      "name": "availability_0_3",
+      "coefficients": {
+        "flow_0_0_3": 1,
+        "flow_0_1_3": 1
+      },
+      "lb": null,
+      "ub": 240
+    },
+    {
+      "name": "cdu_0",
+      "coefficients": {
+        "flow_0_0_0": 1,
+        "flow_0_0_1": 1,
+        "flow_0_0_2": 1,
+        "flow_0_0_3": 1,
+        "flow_0_1_0": 1,
+        "flow_0_1_1": 1,
+        "flow_0_1_2": 1,
+        "flow_0_1_3": 1
+      },
+      "lb": null,
+      "ub": 300
+    },
+    {
+      "name": "demand_1_0",
+      "coefficients": {
+        "flow_1_0_0": 1,
+        "flow_1_0_1": 1,
+        "flow_1_0_2": 1,
+        "flow_1_0_3": 1
+      },
+      "lb": 80.0,
+      "ub": 80.0
+    },
+    {
+      "name": "sulfur_1_0",
+      "coefficients": {
+        "flow_1_0_0": -0.6000000000000001,
+        "flow_1_0_1": 0.2333333333333334,
+        "flow_1_0_2": 1.0666666666666667,
+        "flow_1_0_3": 1.9000000000000001
+      },
+      "lb": null,
+      "ub": 0
+    },
+    {
+      "name": "demand_1_1",
+      "coefficients": {
+        "flow_1_1_0": 1,
+        "flow_1_1_1": 1,
+        "flow_1_1_2": 1,
+        "flow_1_1_3": 1
+      },
+      "lb": 90.0,
+      "ub": 90.0
+    },
+    {
+      "name": "sulfur_1_1",
+      "coefficients": {
+        "flow_1_1_0": -0.8,
+        "flow_1_1_1": 0.03333333333333344,
+        "flow_1_1_2": 0.8666666666666667,
+        "flow_1_1_3": 1.7000000000000002
+      },
+      "lb": null,
+      "ub": 0
+    },
+    {
+      "name": "availability_1_0",
+      "coefficients": {
+        "flow_1_0_0": 1,
+        "flow_1_1_0": 1
+      },
+      "lb": null,
+      "ub": 240
+    },
+    {
+      "name": "availability_1_1",
+      "coefficients": {
+        "flow_1_0_1": 1,
+        "flow_1_1_1": 1
+      },
+      "lb": null,
+      "ub": 240
+    },
+    {
+      "name": "availability_1_2",
+      "coefficients": {
+        "flow_1_0_2": 1,
+        "flow_1_1_2": 1
+      },
+      "lb": null,
+      "ub": 240
+    },
+    {
+      "name": "availability_1_3",
+      "coefficients": {
+        "flow_1_0_3": 1,
+        "flow_1_1_3": 1
+      },
+      "lb": null,
+      "ub": 240
+    },
+    {
+      "name": "cdu_1",
+      "coefficients": {
+        "flow_1_0_0": 1,
+        "flow_1_0_1": 1,
+        "flow_1_0_2": 1,
+        "flow_1_0_3": 1,
+        "flow_1_1_0": 1,
+        "flow_1_1_1": 1,
+        "flow_1_1_2": 1,
+        "flow_1_1_3": 1
+      },
+      "lb": null,
+      "ub": 300
+    },
+    {
+      "name": "demand_2_0",
+      "coefficients": {
+        "flow_2_0_0": 1,
+        "flow_2_0_1": 1,
+        "flow_2_0_2": 1,
+        "flow_2_0_3": 1
+      },
+      "lb": 80.0,
+      "ub": 80.0
+    },
+    {
+      "name": "sulfur_2_0",
+      "coefficients": {
+        "flow_2_0_0": -0.6000000000000001,
+        "flow_2_0_1": 0.2333333333333334,
+        "flow_2_0_2": 1.0666666666666667,
+        "flow_2_0_3": 1.9000000000000001
+      },
+      "lb": null,
+      "ub": 0
+    },
+    {
+      "name": "demand_2_1",
+      "coefficients": {
+        "flow_2_1_0": 1,
+        "flow_2_1_1": 1,
+        "flow_2_1_2": 1,
+        "flow_2_1_3": 1
+      },
+      "lb": 90.0,
+      "ub": 90.0
+    },
+    {
+      "name": "sulfur_2_1",
+      "coefficients": {
+        "flow_2_1_0": -0.8,
+        "flow_2_1_1": 0.03333333333333344,
+        "flow_2_1_2": 0.8666666666666667,
+        "flow_2_1_3": 1.7000000000000002
+      },
+      "lb": null,
+      "ub": 0
+    },
+    {
+      "name": "availability_2_0",
+      "coefficients": {
+        "flow_2_0_0": 1,
+        "flow_2_1_0": 1
+      },
+      "lb": null,
+      "ub": 240
+    },
+    {
+      "name": "availability_2_1",
+      "coefficients": {
+        "flow_2_0_1": 1,
+        "flow_2_1_1": 1
+      },
+      "lb": null,
+      "ub": 240
+    },
+    {
+      "name": "availability_2_2",
+      "coefficients": {
+        "flow_2_0_2": 1,
+        "flow_2_1_2": 1
+      },
+      "lb": null,
+      "ub": 240
+    },
+    {
+      "name": "availability_2_3",
+      "coefficients": {
+        "flow_2_0_3": 1,
+        "flow_2_1_3": 1
+      },
+      "lb": null,
+      "ub": 240
+    },
+    {
+      "name": "cdu_2",
+      "coefficients": {
+        "flow_2_0_0": 1,
+        "flow_2_0_1": 1,
+        "flow_2_0_2": 1,
+        "flow_2_0_3": 1,
+        "flow_2_1_0": 1,
+        "flow_2_1_1": 1,
+        "flow_2_1_2": 1,
+        "flow_2_1_3": 1
+      },
+      "lb": null,
+      "ub": 300
+    },
+    {
+      "name": "demand_3_0",
+      "coefficients": {
+        "flow_3_0_0": 1,
+        "flow_3_0_1": 1,
+        "flow_3_0_2": 1,
+        "flow_3_0_3": 1
+      },
+      "lb": 80.0,
+      "ub": 80.0
+    },
+    {
+      "name": "sulfur_3_0",
+      "coefficients": {
+        "flow_3_0_0": -0.6000000000000001,
+        "flow_3_0_1": 0.2333333333333334,
+        "flow_3_0_2": 1.0666666666666667,
+        "flow_3_0_3": 1.9000000000000001
+      },
+      "lb": null,
+      "ub": 0
+    },
+    {
+      "name": "demand_3_1",
+      "coefficients": {
+        "flow_3_1_0": 1,
+        "flow_3_1_1": 1,
+        "flow_3_1_2": 1,
+        "flow_3_1_3": 1
+      },
+      "lb": 90.0,
+      "ub": 90.0
+    },
+    {
+      "name": "sulfur_3_1",
+      "coefficients": {
+        "flow_3_1_0": -0.8,
+        "flow_3_1_1": 0.03333333333333344,
+        "flow_3_1_2": 0.8666666666666667,
+        "flow_3_1_3": 1.7000000000000002
+      },
+      "lb": null,
+      "ub": 0
+    },
+    {
+      "name": "availability_3_0",
+      "coefficients": {
+        "flow_3_0_0": 1,
+        "flow_3_1_0": 1
+      },
+      "lb": null,
+      "ub": 240
+    },
+    {
+      "name": "availability_3_1",
+      "coefficients": {
+        "flow_3_0_1": 1,
+        "flow_3_1_1": 1
+      },
+      "lb": null,
+      "ub": 240
+    },
+    {
+      "name": "availability_3_2",
+      "coefficients": {
+        "flow_3_0_2": 1,
+        "flow_3_1_2": 1
+      },
+      "lb": null,
+      "ub": 240
+    },
+    {
+      "name": "availability_3_3",
+      "coefficients": {
+        "flow_3_0_3": 1,
+        "flow_3_1_3": 1
+      },
+      "lb": null,
+      "ub": 240
+    },
+    {
+      "name": "cdu_3",
+      "coefficients": {
+        "flow_3_0_0": 1,
+        "flow_3_0_1": 1,
+        "flow_3_0_2": 1,
+        "flow_3_0_3": 1,
+        "flow_3_1_0": 1,
+        "flow_3_1_1": 1,
+        "flow_3_1_2": 1,
+        "flow_3_1_3": 1
+      },
+      "lb": null,
+      "ub": 300
+    }
+  ],
+  "provenance": {
+    "synthetic": true,
+    "seed": 42,
+    "units": "illustrative tonnes and cost units"
+  }
+}

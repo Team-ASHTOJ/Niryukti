@@ -1,0 +1,3 @@
+# Comparison-only environment. Not a dependency of VANTAGE.
+highspy==1.15.1
+numpy==2.5.3

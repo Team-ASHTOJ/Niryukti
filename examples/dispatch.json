@@ -1,0 +1,7 @@
+{
+ "name":"synthetic_economic_dispatch",
+ "sense":"min",
+ "variables":[{"name":"thermal_A","lb":10,"ub":100},{"name":"thermal_B","lb":10,"ub":100},{"name":"thermal_C","lb":0,"ub":80}],
+ "objective":{"linear":[10,12,15],"quadratic_diagonal":[0.2,0.3,0.4]},
+ "constraints":[{"name":"power_balance","lb":150,"ub":150,"coefficients":{"thermal_A":1,"thermal_B":1,"thermal_C":1}}]
+}

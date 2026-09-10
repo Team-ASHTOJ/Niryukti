@@ -1,0 +1,109 @@
+{
+  "name": "synthetic_supply_chain",
+  "sense": "min",
+  "variables": [
+    {
+      "name": "open_0",
+      "lb": 0,
+      "ub": 1,
+      "type": "binary"
+    },
+    {
+      "name": "open_1",
+      "lb": 0,
+      "ub": 1,
+      "type": "binary"
+    },
+    {
+      "name": "ship_0_0",
+      "lb": 0,
+      "ub": 30
+    },
+    {
+      "name": "ship_0_1",
+      "lb": 0,
+      "ub": 30
+    },
+    {
+      "name": "ship_0_2",
+      "lb": 0,
+      "ub": 30
+    },
+    {
+      "name": "ship_1_0",
+      "lb": 0,
+      "ub": 30
+    },
+    {
+      "name": "ship_1_1",
+      "lb": 0,
+      "ub": 30
+    },
+    {
+      "name": "ship_1_2",
+      "lb": 0,
+      "ub": 30
+    }
+  ],
+  "objective": {
+    "linear": [
+      30,
+      20,
+      1,
+      2,
+      3,
+      2,
+      1,
+      2
+    ]
+  },
+  "constraints": [
+    {
+      "name": "capacity_0",
+      "coefficients": {
+        "ship_0_0": 1,
+        "ship_0_1": 1,
+        "ship_0_2": 1,
+        "open_0": -50
+      },
+      "ub": 0
+    },
+    {
+      "name": "capacity_1",
+      "coefficients": {
+        "ship_1_0": 1,
+        "ship_1_1": 1,
+        "ship_1_2": 1,
+        "open_1": -50
+      },
+      "ub": 0
+    },
+    {
+      "name": "demand_0",
+      "coefficients": {
+        "ship_0_0": 1,
+        "ship_1_0": 1
+      },
+      "lb": 20,
+      "ub": 20
+    },
+    {
+      "name": "demand_1",
+      "coefficients": {
+        "ship_0_1": 1,
+        "ship_1_1": 1
+      },
+      "lb": 20,
+      "ub": 20
+    },
+    {
+      "name": "demand_2",
+      "coefficients": {
+        "ship_0_2": 1,
+        "ship_1_2": 1
+      },
+      "lb": 20,
+      "ub": 20
+    }
+  ]
+}

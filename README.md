@@ -1,0 +1,116 @@
+# VANTAGE
+
+**Vector-Accelerated Numerical Toolkit for Advanced Global Optimization**
+
+An independent sparse optimization engine for SIH26119, built in C++20 with an optional CUDA backend. The first prototype solves LPs, separable convex QPs, and small MILPs using its own numerical algorithms. No existing optimization solver is used to solve a VANTAGE model.
+
+**Research prototype:** numerical correctness is tested on representative cases; industrial robustness, general convex QP support, and competitive large-scale MILP performance remain development work. The name does not imply support for general nonconvex global optimization.
+
+## Run it
+
+```bash
+./scripts/build.sh                 # Detect CUDA; otherwise build CPU only
+./scripts/run_tests.sh
+./build/vantage devices
+./build/vantage solve examples/refinery.json --device cuda --json-out result.json
+./build/vantage verify examples/refinery.json result.json
+./scripts/run_demo.sh
+```
+
+Open `results/demo/index.html` after the demo. It contains actual CPU/CUDA/HiGHS measurements, every measured run's status, raw outputs, and downloadable CSV. The demo works offline with the checked-in small instances. HiGHS is optional and runs in an external comparison process.
+
+For a CPU-only build:
+
+```bash
+cmake -S . -B build-cpu -DVANTAGE_CUDA=OFF -DCMAKE_BUILD_TYPE=Release
+cmake --build build-cpu --parallel 4
+./scripts/run_tests.sh build-cpu
+```
+
+Requirements: CMake ≥3.24, a C++20 compiler, Python ≥3.10 for scripts. CUDA builds require the CUDA toolkit and a compatible host compiler. The build script selects GCC 15 when available; override CMake settings for other installations. GPU runtime tests run only when a usable CUDA device is present. Default arithmetic is FP64; unsafe fast-math is not enabled.
+
+## What works in Phase 1
+
+| Component | Implemented behavior |
+|---|---|
+| Independent solver core | Own PDHG updates, preprocessing, scaling, verification, and branch-and-bound |
+| Sparse matrices | COO construction with duplicate aggregation; CSR and explicit sparse transpose; 64-bit offsets and indices |
+| CPU and CUDA | Same algorithm; OpenMP CPU loops; cuSPARSE GPU SpMV and fused update/averaging kernels |
+| LP | Box-constrained interval-row PDHG, conservative norm-based steps, averaging, adaptive restart and primal/dual weighting |
+| Convex QP | Nonnegative **diagonal Q**, using an exact separable proximal update |
+| MILP | Best-bound search, most-fractional branching, warm relaxations, rounding and continuous repair, incumbent and global gap |
+| Preprocessing | Fixed-variable and bounded isolated-column elimination, empty rows, row-activity infeasibility checks, reversible reconstruction |
+| Scaling | Iterative diagonal equilibration with original-space verification |
+| Input | MPS linear/integer sections and ranges; diagonal `QMATRIX`/`QUADOBJ`; documented LP text subset; native sparse JSON |
+| Verification | Original objective, row/bound feasibility, integrality, projected stationarity, complementarity, and Lagrangian lower bound |
+| API and CLI | C++ library, Python subprocess API, solve/inspect/explain/verify/convert/devices commands |
+| Demonstration | Synthetic refinery blending LP, refinery scheduling MILP, supply-chain MILP, and power-dispatch QP |
+| Benchmarks | External HiGHS adapter, CPU/CUDA comparisons, raw runs including failures, checksums, offline HTML and CSV |
+
+## CLI examples
+
+```bash
+./build/vantage inspect datasets/afiro.mps
+./build/vantage explain examples/refinery.json
+./build/vantage solve datasets/afiro.mps --device cpu --tol 1e-6 --threads 4
+./build/vantage solve examples/dispatch.json --device cuda
+./build/vantage solve examples/supply_chain.json --time-limit 30 --mip-gap 1e-4
+./build/vantage convert examples/toy.lp /tmp/toy.mps
+./build/vantage solve examples/refinery.json --json-out /tmp/first.json
+./build/vantage solve examples/refinery.json --warm-start /tmp/first.json
+python3 examples/warm_resolve.py
+```
+
+A changed model requires `--warm-start previous.json --allow-model-change`; variable and row names/order must still agree. The parametric demo increases demand by 5% and records both cold and warm solves. It does not assume that warm starting always helps.
+
+`solve` writes JSON to stdout; `--verbose` writes iteration progress to stderr. `--json-out` / `--solution-out` save the same JSON format. Exit codes: `0` optimal/successful command; `2` non-optimal solve or failed solution verification; `1` invalid input, unsupported parser syntax, or execution error. `verify` checks feasibility at `1e-6` and reports continuous optimality only if KKT also passes. MILP verification checks the incumbent, not a replay of the search tree.
+
+## Python
+
+```bash
+export PYTHONPATH="$PWD/python"
+# Optional packaging: pip install -e . ; set VANTAGE_BINARY if the binary is elsewhere.
+```
+
+```python
+import vantage
+
+model = vantage.Model("production")
+x = model.add_var("x", ub=10)
+y = model.add_var("y", ub=10)
+model.add_constraint({x: 1, y: 2}, ">=", 4)
+model.set_objective({x: 1, y: 1})
+result = model.solve(device="cpu")
+print(result["status"], result["objective"], result["primal"])
+```
+
+The Python API launches the C++ binary; it is not a Python numerical implementation or a wrapper around a third-party solver. The C++ sparse API is in [`include/vantage/vantage.hpp`](include/vantage/vantage.hpp).
+
+## Benchmarks and larger cases
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r benchmark/requirements.txt
+.venv/bin/python benchmark/run.py datasets/afiro.mps datasets/adlittle.mps \
+  datasets/israel.mps datasets/e226.mps --runs 3 --threads 4 --output results/netlib
+
+python3 examples/generate.py --crudes 16 --products 8 --periods 365 \
+  --output datasets/refinery_large.json
+./build/vantage convert datasets/refinery_large.json datasets/refinery_large.mps
+.venv/bin/python benchmark/run.py datasets/refinery_large.mps \
+  --runs 3 --threads 4 --time-limit 60 --output results/scalability
+```
+
+The larger example has 46,720 variables and 186,880 nonzeros. It is synthetic and largely separable by period; it is a sparse-computation demonstration, not evidence of realistic industrial scheduling difficulty. Request bigger dimensions for scalability experiments, with appropriate memory limits.
+
+Read [`docs/benchmark_methodology.md`](docs/benchmark_methodology.md) before interpreting timing ratios. Reports retain unsuccessful runs. A lower primal objective alone is not a win: feasibility, tolerances, gap, and model class matter.
+
+The measured results and test evidence are recorded in [the Phase 1 validation snapshot](docs/validation.md), including the instances that reached limits.
+
+## Limits and next phase
+
+General/off-diagonal Q, MIQP, nonlinear models, general infeasibility/recession rays, simplex/IPM, advanced presolve propagation, cuts, pseudo-cost branching, persistent GPU contexts, and checkpoints are not implemented. MILP may return a feasible incumbent with an unresolved gap. Time limits are checked between iteration chunks; preprocessing, verification, and a chunk may overrun the requested limit.
+
+GPU arrays remain resident between checks; full current and averaged iterates are copied to CPU for periodic independent verification. This is correct and testable but expensive. GPU-side residual reductions and a reusable verification workspace are important next steps. No GPU speed advantage over HiGHS is assumed.
+
+See [architecture](docs/architecture.md), [mathematics](docs/algorithms.md), [formats](docs/supported_formats.md), [Phase 2 work](docs/phase2.md), and [dependency policy](docs/dependency_policy.md).

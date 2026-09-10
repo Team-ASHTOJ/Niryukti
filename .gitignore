@@ -1,0 +1,8 @@
+/build*/
+/.venv/
+/results/
+__pycache__/
+*.py[cod]
+*.egg-info/
+/datasets/refinery_large.*
+/datasets/numerical/

@@ -1,0 +1,262 @@
+{
+  "name": "synthetic_refinery_schedule",
+  "sense": "min",
+  "variables": [
+    {
+      "name": "flow_0",
+      "lb": 0,
+      "ub": 100,
+      "type": "continuous"
+    },
+    {
+      "name": "on_0",
+      "lb": 0,
+      "ub": 1,
+      "type": "binary"
+    },
+    {
+      "name": "start_0",
+      "lb": 0,
+      "ub": 1,
+      "type": "binary"
+    },
+    {
+      "name": "inventory_0",
+      "lb": 0,
+      "ub": 100,
+      "type": "continuous"
+    },
+    {
+      "name": "flow_1",
+      "lb": 0,
+      "ub": 100,
+      "type": "continuous"
+    },
+    {
+      "name": "on_1",
+      "lb": 0,
+      "ub": 1,
+      "type": "binary"
+    },
+    {
+      "name": "start_1",
+      "lb": 0,
+      "ub": 1,
+      "type": "binary"
+    },
+    {
+      "name": "inventory_1",
+      "lb": 0,
+      "ub": 100,
+      "type": "continuous"
+    },
+    {
+      "name": "flow_2",
+      "lb": 0,
+      "ub": 100,
+      "type": "continuous"
+    },
+    {
+      "name": "on_2",
+      "lb": 0,
+      "ub": 1,
+      "type": "binary"
+    },
+    {
+      "name": "start_2",
+      "lb": 0,
+      "ub": 1,
+      "type": "binary"
+    },
+    {
+      "name": "inventory_2",
+      "lb": 0,
+      "ub": 100,
+      "type": "continuous"
+    },
+    {
+      "name": "flow_3",
+      "lb": 0,
+      "ub": 100,
+      "type": "continuous"
+    },
+    {
+      "name": "on_3",
+      "lb": 0,
+      "ub": 1,
+      "type": "binary"
+    },
+    {
+      "name": "start_3",
+      "lb": 0,
+      "ub": 1,
+      "type": "binary"
+    },
+    {
+      "name": "inventory_3",
+      "lb": 0,
+      "ub": 100,
+      "type": "continuous"
+    }
+  ],
+  "objective": {
+    "linear": [
+      4,
+      30,
+      20,
+      0.2,
+      4,
+      30,
+      20,
+      0.2,
+      4,
+      30,
+      20,
+      0.2,
+      4,
+      30,
+      20,
+      0.2
+    ]
+  },
+  "constraints": [
+    {
+      "name": "capacity_0",
+      "coefficients": {
+        "flow_0": 1,
+        "on_0": -100
+      },
+      "ub": 0
+    },
+    {
+      "name": "min_run_0",
+      "coefficients": {
+        "flow_0": 1,
+        "on_0": -20
+      },
+      "lb": 0
+    },
+    {
+      "name": "balance_0",
+      "coefficients": {
+        "flow_0": 1,
+        "inventory_0": -1
+      },
+      "lb": 40,
+      "ub": 40
+    },
+    {
+      "name": "startup_0",
+      "coefficients": {
+        "start_0": 1,
+        "on_0": -1
+      },
+      "lb": 0
+    },
+    {
+      "name": "capacity_1",
+      "coefficients": {
+        "flow_1": 1,
+        "on_1": -100
+      },
+      "ub": 0
+    },
+    {
+      "name": "min_run_1",
+      "coefficients": {
+        "flow_1": 1,
+        "on_1": -20
+      },
+      "lb": 0
+    },
+    {
+      "name": "balance_1",
+      "coefficients": {
+        "flow_1": 1,
+        "inventory_1": -1,
+        "inventory_0": 1
+      },
+      "lb": 40,
+      "ub": 40
+    },
+    {
+      "name": "startup_1",
+      "coefficients": {
+        "start_1": 1,
+        "on_1": -1,
+        "on_0": 1
+      },
+      "lb": 0
+    },
+    {
+      "name": "capacity_2",
+      "coefficients": {
+        "flow_2": 1,
+        "on_2": -100
+      },
+      "ub": 0
+    },
+    {
+      "name": "min_run_2",
+      "coefficients": {
+        "flow_2": 1,
+        "on_2": -20
+      },
+      "lb": 0
+    },
+    {
+      "name": "balance_2",
+      "coefficients": {
+        "flow_2": 1,
+        "inventory_2": -1,
+        "inventory_1": 1
+      },
+      "lb": 40,
+      "ub": 40
+    },
+    {
+      "name": "startup_2",
+      "coefficients": {
+        "start_2": 1,
+        "on_2": -1,
+        "on_1": 1
+      },
+      "lb": 0
+    },
+    {
+      "name": "capacity_3",
+      "coefficients": {
+        "flow_3": 1,
+        "on_3": -100
+      },
+      "ub": 0
+    },
+    {
+      "name": "min_run_3",
+      "coefficients": {
+        "flow_3": 1,
+        "on_3": -20
+      },
+      "lb": 0
+    },
+    {
+      "name": "balance_3",
+      "coefficients": {
+        "flow_3": 1,
+        "inventory_3": -1,
+        "inventory_2": 1
+      },
+      "lb": 40,
+      "ub": 40
+    },
+    {
+      "name": "startup_3",
+      "coefficients": {
+        "start_3": 1,
+        "on_3": -1,
+        "on_2": 1
+      },
+      "lb": 0
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+# Numerical validation scope
+
+The CPU/CUDA core suite currently contains 160 assertions when CUDA is available. It checks analytical LP and diagonal QP optima; fixed-variable reconstruction; scaled rows; a free variable; empty rows and isolated columns; direct unboundedness; invalid/nonconvex inputs; limits; nonfinite/overflow rejection; MPS/JSON round trips; MPS ranges and implicit integer bounds; maximization; and 25 deterministic binary MILPs against exhaustive enumeration.
+
+CLI integration tests cover model loading, saved-solution verification, deliberate solution corruption, invalid options and malformed input, Python model construction, and explicit parametric warm starts. CPU-only and AddressSanitizer/UndefinedBehaviorSanitizer builds run the same core/integration tests. The dependency guard scans production code independently of benchmark adapters.
+
+This is meaningful prototype coverage, not a comprehensive robustness claim. Extremely ill-conditioned systems, nearly dependent rows, weak MIP relaxations and broad public suites still need extensive work. The engine reports limits/unresolved bounds when it cannot establish the configured numerical criteria. The published benchmark reports retain those outcomes.
+
+For current accuracy definitions and the scope of lower-bound enclosures, see `algorithms.md`. Termination is numerical and tolerance-based, and reported primal objectives may be slightly better than an exact optimum when small feasibility violations remain. Absolute residuals are available alongside normalized ones.

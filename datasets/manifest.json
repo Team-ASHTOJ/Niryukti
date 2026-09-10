@@ -1,0 +1,38 @@
+[
+  {
+    "instance": "afiro",
+    "path": "afiro.mps",
+    "source": "https://raw.githubusercontent.com/ERGO-Code/HiGHS/73cac48c5340d775a477087198611862559be250/check/instances/afiro.mps",
+    "sha256": "9cd304f02717cbd6f85068cb777b69d28539b22a4868ae0f0fb425f514f0eea5",
+    "bytes": 3271,
+    "suite": "Netlib LP",
+    "mirror_revision": "73cac48c5340d775a477087198611862559be250"
+  },
+  {
+    "instance": "adlittle",
+    "path": "adlittle.mps",
+    "source": "https://raw.githubusercontent.com/ERGO-Code/HiGHS/73cac48c5340d775a477087198611862559be250/check/instances/adlittle.mps",
+    "sha256": "ed99da009e35279828219ff7f04a2cd4f170692bedf58f704b622338e4adc1f9",
+    "bytes": 16525,
+    "suite": "Netlib LP",
+    "mirror_revision": "73cac48c5340d775a477087198611862559be250"
+  },
+  {
+    "instance": "israel",
+    "path": "israel.mps",
+    "source": "https://raw.githubusercontent.com/ERGO-Code/HiGHS/73cac48c5340d775a477087198611862559be250/check/instances/israel.mps",
+    "sha256": "09ff7b847b40ac47e23ab8925846806d76e31b65b76b98a31437d08d74e339eb",
+    "bytes": 80486,
+    "suite": "Netlib LP",
+    "mirror_revision": "73cac48c5340d775a477087198611862559be250"
+  },
+  {
+    "instance": "e226",
+    "path": "e226.mps",
+    "source": "https://raw.githubusercontent.com/ERGO-Code/HiGHS/73cac48c5340d775a477087198611862559be250/check/instances/e226.mps",
+    "sha256": "f3cc263fdb5845ef52e504b5b1f4e21215ec3b48ddf8d8547b08dbdee4a709e0",
+    "bytes": 92261,
+    "suite": "Netlib LP",
+    "mirror_revision": "73cac48c5340d775a477087198611862559be250"
+  }
+]
