@@ -9,7 +9,7 @@ int main(int argc, char **argv) {
     std::signal(SIGINT, [](int) { interrupted = 1; });
     try {
         if (argc < 2) {
-            std::cout << "VANTAGE 0.1 — Vector-Accelerated Numerical Toolkit for Advanced Global "
+            std::cout << "VANTAGE 0.2 — Vector-Accelerated Numerical Toolkit for Advanced Global "
                          "Optimization\nCommands: solve MODEL, inspect MODEL, explain MODEL, "
                          "verify MODEL SOLUTION, convert INPUT OUTPUT, devices\nSolve: --device "
                          "cpu|cuda|auto --tol 1e-6 --time-limit 60 --iterations 100000\n       "
@@ -39,7 +39,7 @@ int main(int argc, char **argv) {
                                 {"nonzeros", m.A.value.size()},
                                 {"fingerprint", m.fingerprint()},
                                 {"gpu_storage_estimate_bytes",
-                                 48. * m.A.value.size() + 128. * (m.A.rows + m.A.cols + 2)}};
+                                 48. * m.A.value.size() + 192. * (m.A.rows + m.A.cols + 2)}};
             if (cmd == "explain") {
                 j["method"] = m.is_mip()
                                   ? "Best-bound branch-and-bound using VANTAGE PDHG relaxations"
@@ -64,6 +64,14 @@ int main(int argc, char **argv) {
             if (argc != 4)
                 throw std::runtime_error("verify MODEL SOLUTION");
             auto r = read_solution(m, argv[3]);
+            if (!r.infeasibility_ray.empty()) {
+                Verifier verifier(m);
+                r.certificate_margin = verifier.infeasibility_bound(r.infeasibility_ray);
+                bool pass = r.certificate_margin > 0 && std::isfinite(r.certificate_margin);
+                r.status = pass ? "VERIFIED_INFEASIBLE" : "VERIFICATION_FAILED";
+                std::cout << result_json(m, r) << '\n';
+                return pass ? 0 : 2;
+            }
             r.accuracy = verify(m, r.x, r.y);
             bool pass =
                 r.accuracy.finite && r.accuracy.primal <= 1e-6 && r.accuracy.integrality <= 1e-6;

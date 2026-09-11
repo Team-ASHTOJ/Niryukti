@@ -645,7 +645,7 @@ std::string result_json(const Model &m, const Result &r) {
     auto a = r.accuracy;
     json j = {
         {"solver", "VANTAGE"},
-        {"version", "0.1.0"},
+        {"version", "0.2.0"},
         {"status", r.status},
         {"message", r.message},
         {"problem_type", m.is_mip()  ? "MILP"
@@ -678,14 +678,20 @@ std::string result_json(const Model &m, const Result &r) {
           {"iteration_seconds", r.iteration_seconds},
           {"verification_seconds", r.verification_seconds},
           {"iterations", r.iterations},
-          {"restarts", r.restarts}}},
+          {"restarts", r.restarts},
+          {"rejected_steps", r.rejected_steps}}},
         {"hardware", {{"backend", r.backend}, {"device", r.device_name}, {"precision", "FP64"}}},
         {"presolve", {{"removed_rows", r.removed_rows}, {"removed_columns", r.removed_columns}}},
         {"primal", r.x},
         {"dual", r.y}};
+    if (!r.infeasibility_ray.empty())
+        j["certificate"] = {{"kind", "BOX_ROW_FARKAS"},
+                            {"dual_ray", r.infeasibility_ray},
+                            {"verified_margin", r.certificate_margin}};
     if (m.is_mip())
         j["mip"] = {
             {"nodes", r.nodes},
+            {"bounds_tightened", r.bounds_tightened},
             {"nodes_remaining", r.nodes_remaining},
             {"best_bound", std::isfinite(r.best_bound) ? json(m.sense * r.best_bound) : json()},
             {"relative_gap", r.mip_gap}};
@@ -713,6 +719,11 @@ Result read_solution(const Model &m, const std::string &path, bool allow_model_c
     r.x = j.at("primal").get<std::vector<double>>();
     r.y = j.at("dual").get<std::vector<double>>();
     r.status = j.at("status");
+    if (j.contains("certificate")) {
+        if (j.at("certificate").at("kind") != "BOX_ROW_FARKAS")
+            throw std::runtime_error("Unsupported certificate kind");
+        r.infeasibility_ray = j.at("certificate").at("dual_ray").get<std::vector<double>>();
+    }
     return r;
 }
 } // namespace vantage

@@ -7,6 +7,86 @@ struct Node {
     double bound = -inf;
     int depth = 0;
 };
+// Conservative interval arithmetic for implied INTEGER bounds only. Row bounds stay
+// unchanged, so continuous dual postsolve does not need new multiplier mappings.
+long double outward(long double value, bool lower) {
+    return std::nextafter(value, lower ? -std::numeric_limits<long double>::infinity()
+                                       : std::numeric_limits<long double>::infinity());
+}
+bool propagate(const Model &m, Node &node, int64_t &tightened) {
+    for (int pass = 0; pass < 5; pass++) {
+        bool changed = false;
+        for (int64_t row = 0; row < m.A.rows; row++) {
+            auto begin = m.A.ptr[row], end = m.A.ptr[row + 1];
+            size_t count = end - begin;
+            std::vector<long double> low(count + 1), high(count + 1);
+            for (size_t t = 0; t < count; t++) {
+                auto k = begin + t;
+                auto j = m.A.index[k];
+                double a = m.A.value[k];
+                auto lo = outward((long double)a * (a > 0 ? node.lb[j] : node.ub[j]), true);
+                auto hi = outward((long double)a * (a > 0 ? node.ub[j] : node.lb[j]), false);
+                low[t + 1] = outward(low[t] + lo, true);
+                high[t + 1] = outward(high[t] + hi, false);
+            }
+            if (low[count] > m.ru[row] || high[count] < m.rl[row])
+                return false;
+            long double suffix_low = 0, suffix_high = 0;
+            for (size_t t = count; t-- > 0;) {
+                auto k = begin + t;
+                auto j = m.A.index[k];
+                double a = m.A.value[k];
+                auto term_low = outward((long double)a * (a > 0 ? node.lb[j] : node.ub[j]), true);
+                auto term_high = outward((long double)a * (a > 0 ? node.ub[j] : node.lb[j]), false);
+                if (m.types[j] != VarType::Continuous) {
+                    long double others_low = outward(low[t] + suffix_low, true);
+                    long double others_high = outward(high[t] + suffix_high, false);
+                    long double implied_low = -inf, implied_high = inf;
+                    if (std::isfinite(m.rl[row]) && std::isfinite(others_high)) {
+                        long double numerator = outward((long double)m.rl[row] - others_high, true);
+                        if (a > 0)
+                            implied_low = outward(numerator / a, true);
+                        else
+                            implied_high = outward(numerator / a, false);
+                    }
+                    if (std::isfinite(m.ru[row]) && std::isfinite(others_low)) {
+                        long double numerator = outward((long double)m.ru[row] - others_low, false);
+                        if (a > 0)
+                            implied_high = outward(numerator / a, false);
+                        else
+                            implied_low = outward(numerator / a, true);
+                    }
+                    // Restrict tightening to exactly representable integer magnitudes.
+                    if (std::abs(implied_low) < 0x1p52L) {
+                        double bound = double(std::ceil(implied_low));
+                        if (bound > node.lb[j]) {
+                            node.lb[j] = bound;
+                            changed = true;
+                            tightened++;
+                        }
+                    }
+                    if (std::abs(implied_high) < 0x1p52L) {
+                        double bound = double(std::floor(implied_high));
+                        if (bound < node.ub[j]) {
+                            node.ub[j] = bound;
+                            changed = true;
+                            tightened++;
+                        }
+                    }
+                    if (node.lb[j] > node.ub[j])
+                        return false;
+                }
+                // The old interval remains a safe superset after any tightening above.
+                suffix_low = outward(suffix_low + term_low, true);
+                suffix_high = outward(suffix_high + term_high, false);
+            }
+        }
+        if (!changed)
+            break;
+    }
+    return true;
+}
+
 struct Compare {
     bool operator()(const Node &a, const Node &b) const {
         return a.bound > b.bound;
@@ -71,6 +151,10 @@ Result solve_mip(const Model &original, const Options &options) {
             closed = std::min(closed, node.bound);
             continue;
         }
+        if (options.presolve && !propagate(original, node, out.bounds_tightened)) {
+            out.nodes++;
+            continue;
+        }
         relaxation.lb = node.lb;
         relaxation.ub = node.ub;
         Options o = options;
@@ -82,6 +166,7 @@ Result solve_mip(const Model &original, const Options &options) {
         out.nodes++;
         out.iterations += r.iterations;
         out.restarts += r.restarts;
+        out.rejected_steps += r.rejected_steps;
         out.iteration_seconds += r.iteration_seconds;
         out.transfer_seconds += r.transfer_seconds;
         out.preprocess_seconds += r.preprocess_seconds;
@@ -115,6 +200,8 @@ Result solve_mip(const Model &original, const Options &options) {
             ro.time_limit = std::max(0., options.time_limit - elapsed(start));
             auto rr = solve_continuous(repair, ro);
             out.iterations += rr.iterations;
+            out.restarts += rr.restarts;
+            out.rejected_steps += rr.rejected_steps;
             out.iteration_seconds += rr.iteration_seconds;
             out.verification_seconds += rr.verification_seconds;
             out.preprocess_seconds += rr.preprocess_seconds;

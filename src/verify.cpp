@@ -9,9 +9,9 @@ long double down(long double v) {
 long double up(long double v) {
     return std::nextafter(v, std::numeric_limits<long double>::infinity());
 }
-double lp_lower_bound(const Model &m, const std::vector<double> &y) {
-    auto at = m.A.transpose();
-    long double lower = m.offset;
+double lp_lower_bound(const Model &m, const Sparse &at, const std::vector<double> &y,
+                      bool feasibility = false) {
+    long double lower = feasibility ? 0 : m.offset;
     for (size_t i = 0; i < y.size(); i++)
         if (y[i] != 0) {
             double b = y[i] > 0 ? m.ru[i] : m.rl[i];
@@ -23,7 +23,7 @@ double lp_lower_bound(const Model &m, const std::vector<double> &y) {
             lower = down(lower - up(term));
         }
     for (size_t j = 0; j < m.c.size(); j++) {
-        long double gl = m.c[j], gu = m.c[j];
+        long double gl = feasibility ? 0 : m.c[j], gu = gl;
         for (auto k = at.ptr[j]; k < at.ptr[j + 1]; k++)
             if (y[at.index[k]] != 0 && at.value[k] != 0) {
                 long double v = (long double)at.value[k] * y[at.index[k]];
@@ -53,7 +53,22 @@ double lp_lower_bound(const Model &m, const std::vector<double> &y) {
     return std::nextafter(result, -inf);
 }
 } // namespace
-Accuracy verify(const Model &m, const std::vector<double> &x, const std::vector<double> &y) {
+Verifier::Verifier(const Model &source)
+    : model(source), transpose(source.A.transpose()), activity(source.A.rows),
+      transpose_product(source.A.cols) {}
+
+double Verifier::infeasibility_bound(const std::vector<double> &y) const {
+    if (y.size() != model.rl.size())
+        return -inf;
+    for (auto v : y)
+        if (!std::isfinite(v))
+            return -inf;
+    return lp_lower_bound(model, transpose, y, true);
+}
+
+Accuracy Verifier::evaluate(const std::vector<double> &x, const std::vector<double> &y,
+                            bool compute_safe_bound) {
+    const auto &m = model;
     Accuracy a;
     if (x.size() != m.c.size() || y.size() != m.rl.size())
         return a;
@@ -63,7 +78,22 @@ Accuracy verify(const Model &m, const std::vector<double> &x, const std::vector<
     for (auto v : y)
         if (!std::isfinite(v))
             return a;
-    auto ax = m.A.multiply(x), aty = m.A.transpose().multiply(y);
+    auto multiply_into = [](const Sparse &a, const std::vector<double> &input,
+                            std::vector<double> &output) {
+#ifdef _OPENMP
+#pragma omp parallel for if (a.rows > 10000)
+#endif
+        for (int64_t i = 0; i < a.rows; i++) {
+            double sum = 0;
+            for (auto k = a.ptr[i]; k < a.ptr[i + 1]; k++)
+                sum += a.value[k] * input[a.index[k]];
+            output[i] = sum;
+        }
+    };
+    multiply_into(m.A, x, activity);
+    multiply_into(transpose, y, transpose_product);
+    const auto &ax = activity;
+    const auto &aty = transpose_product;
     for (auto v : ax)
         if (!std::isfinite(v))
             return Accuracy{};
@@ -81,12 +111,10 @@ Accuracy verify(const Model &m, const std::vector<double> &x, const std::vector<
     // Per-row normalization prevents an unrelated enormous RHS from hiding a violation.
     for (size_t i = 0; i < y.size(); i++) {
         double v = std::max({0., m.rl[i] - ax[i], ax[i] - m.ru[i]});
-        double scale = 1;
         if (std::isfinite(m.rl[i]))
-            scale = std::max(scale, 1 + std::abs(m.rl[i]));
+            a.primal = std::max(a.primal, std::max(0., m.rl[i] - ax[i]) / (1 + std::abs(m.rl[i])));
         if (std::isfinite(m.ru[i]))
-            scale = std::max(scale, 1 + std::abs(m.ru[i]));
-        a.primal = std::max(a.primal, v / scale);
+            a.primal = std::max(a.primal, std::max(0., ax[i] - m.ru[i]) / (1 + std::abs(m.ru[i])));
         a.primal_absolute = std::max(a.primal_absolute, v);
         double endpoint = y[i] > 0 ? m.ru[i] : m.rl[i];
         if (y[i] != 0) {
@@ -151,7 +179,7 @@ Accuracy verify(const Model &m, const std::vector<double> &x, const std::vector<
                                     (1 + std::abs(a.objective) + std::abs(a.lower_bound)));
     }
     if (!m.is_qp())
-        a.lower_bound = lp_lower_bound(m, y);
+        a.lower_bound = compute_safe_bound ? lp_lower_bound(m, transpose, y) : -inf;
     if (std::isfinite(a.lower_bound))
         a.gap = std::max(a.gap, std::abs(a.objective - a.lower_bound) /
                                     (1 + std::abs(a.objective) + std::abs(a.lower_bound)));
@@ -163,5 +191,9 @@ Accuracy verify(const Model &m, const std::vector<double> &x, const std::vector<
         a.lower_bound = -inf;
     }
     return a;
+}
+Accuracy verify(const Model &m, const std::vector<double> &x, const std::vector<double> &y) {
+    Verifier verifier(m);
+    return verifier.evaluate(x, y);
 }
 } // namespace vantage

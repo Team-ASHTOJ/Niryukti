@@ -19,13 +19,16 @@ Prepared prepare(const Model &, const Options &);
 class IterationBackend {
   public:
     virtual ~IterationBackend() = default;
-    virtual void advance(int count, double tau, double sigma) = 0;
+    virtual int advance(int count, double tau, double sigma) = 0;
+    virtual int64_t rejected_steps() const {
+        return 0;
+    }
     virtual void candidates(std::vector<double> &x, std::vector<double> &y, std::vector<double> &ax,
                             std::vector<double> &ay) = 0;
     virtual void reset(const std::vector<double> &x, const std::vector<double> &y) = 0;
 };
 std::unique_ptr<IterationBackend> cpu_backend(const Model &, const std::vector<double> &,
-                                              const std::vector<double> &);
+                                              const std::vector<double> &, bool adaptive = false);
 std::unique_ptr<IterationBackend> cuda_backend(const Model &, const std::vector<double> &,
-                                               const std::vector<double> &);
+                                               const std::vector<double> &, bool adaptive = false);
 } // namespace vantage

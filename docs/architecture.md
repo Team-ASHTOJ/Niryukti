@@ -29,3 +29,13 @@ Preprocessing has an explicit old/new row and column mapping, fixed values and s
 The MILP queue stores bound vectors and warm-start vectors. The sparse matrix is reused, but bound storage is O(variables) per node; a persistent bound-change representation is Phase 2 work. Unresolved leaves remain in global-bound accounting. The iteration objective never substitutes for a lower bound.
 
 The benchmark process is outside the solver library and Python product API. It can launch HiGHS in a different process. CMake does not discover, link or download any third-party optimization engine.
+
+## Phase 2 ownership and data flow
+
+`Verifier` holds a reference to an immutable original model and owns a cached transpose, activity vector and transpose-product vector. The model must outlive it. It is reused within a continuous solve and is not shared concurrently. Cheap checkpoint evaluation cannot supply a pruning bound; strict final evaluation computes the conservative LP bound.
+
+Each CPU/CUDA iteration backend owns accepted and trial vectors, averaging state and adaptive step state. Rejected trials leave the current point unchanged. CUDA performs block reductions and a device decision before committing a trial; the host receives six control scalars at a chunk boundary. The host handles time limits, candidate selection, restarts and final independent checks. Accepted and rejected step counts are distinct.
+
+An infeasibility ray is stored separately from the best primal candidate. Its original-space margin is recomputed by the verifier when loading a certificate, so saved status text and stored margin are never treated as proof.
+
+The dashboard is a local standard-library Python HTTP service over the CLI, with static browser assets. It uses process isolation, a session token for mutations, loopback host checks, bounded uploads and one active solve. It does not introduce an optimization dependency. Saved benchmark campaigns and live-run histories are separate: browsing old measurements does not pretend to be a fresh solve.

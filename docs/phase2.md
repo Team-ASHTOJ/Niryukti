@@ -1,14 +1,18 @@
-# Phase 2: prioritized development
+# Phase 2: progress and remaining development
 
 The official SIH problem statement is authoritative. The long AI-generated brief supplied with the project is guidance; its complete feature list is not a claim about this prototype.
+
+## Completed in the 0.2 implementation
+
+Cached independent verification; violated-endpoint normalization; adaptive trial steps on CPU/CUDA; step-weighted averages and growing restart epochs; conservative integer-node propagation; replayable box/row Farkas certificates; expanded enumeration and certificate tests. See [development log](development_log.md) for validation status and [algorithms](algorithms.md) for exact behavior. General QP and advanced optimizer work below remain future work.
 
 ## Numerical work
 
 1. Broaden regression problems before tuning. Add ill-conditioned, degenerate, nearly dependent and infeasible models, full Netlib selections and independent primal/dual audits. Preserve all unsuccessful cases.
-2. Develop a reusable independent-verification workspace and cached sparse transpose. Currently verification repeatedly allocates/transposes and can dominate solve time.
-3. Introduce a mathematically justified adaptive step-size/backtracking rule, diagonal step preconditioning and residual balancing. Current step product uses a conservative norm bound and only the primal-dual ratio adapts.
+2. Extend the now-cached independent verifier with GPU monitoring reductions and stronger numerical audits.
+3. Evaluate the new adaptive trial-step method across broader suites; add diagonal step preconditioning and stronger restart merit functions.
 4. Add reversible singleton processing, bound propagation, safe duplicate/redundant-row detection and comprehensive dual postsolve. Current presolve deliberately stays small.
-5. Add verified general Farkas/recession certificates. General infeasible/unbounded cases currently often reach limits.
+5. Broaden certificate discovery beyond the implemented normalized-multiplier box/row Farkas test; add general recession directions and presolve/tree proof artifacts.
 6. Implement general convex sparse QP, PSD checks, and an appropriate proximal/CG or forward-gradient method. Current QP support is diagonal only.
 
 ## GPU and scale
@@ -36,4 +40,4 @@ The official SIH problem statement is authoritative. The long AI-generated brief
 
 ## Current shortcuts to preserve in presentations
 
-No full PDLP implementation, general PDHCG, cuts, simplex, IPM, nonlinear optimizer, mixed precision, multi-GPU support, formal rational certificate system, cloud service or graphical modeling environment is claimed. A polished UI was not part of the official requirement; the offline report exists to inspect actual numerical results.
+No full PDLP implementation, general PDHCG, cuts, simplex, IPM, nonlinear optimizer, mixed precision, multi-GPU support, formal rational certificate system, cloud service or graphical modeling environment is claimed. A local dashboard and offline reports inspect actual solves and measurements; the numerical engine remains the primary contribution.

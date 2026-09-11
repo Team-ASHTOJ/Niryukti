@@ -26,6 +26,15 @@ with tempfile.TemporaryDirectory(prefix='vantage-cli-tests-') as tmp:
     for i,data in enumerate(malformed):
         path=tmp/f'bad{i}.json';path.write_text(json.dumps(data));r=run('solve',path);assert r.returncode==1,(r.returncode,r.stderr)
     path=tmp/'bad.mps';path.write_text("NAME BAD\nROWS\n N OBJ\nCOLUMNS\n M 'MARKER' 'INTEND'\nENDATA\n");assert run('solve',path).returncode==1
+    # Certificate verification recomputes the proof and rejects a tampered ray.
+    path=tmp/'infeasible.lp'
+    path.write_text('Minimize\n x\nSubject To\n a: x + y >= 3\n b: x + y <= 1\nBounds\n 0 <= x <= 10\n 0 <= y <= 10\nEnd\n')
+    r=run('solve',path,'--json-out',sol)
+    data=json.loads(sol.read_text());assert data['status']=='INFEASIBLE',data['status']
+    checked=run('verify',path,sol);assert checked.returncode==0,checked.stdout
+    assert json.loads(checked.stdout)['status']=='VERIFIED_INFEASIBLE'
+    data['certificate']['dual_ray']=[0,0];sol.write_text(json.dumps(data))
+    assert run('verify',path,sol).returncode==2
     # A changed model is rejected unless parametric warm-start use is explicit.
     model=Model();x=model.add_var('x',ub=10);y=model.add_var('y',ub=10)
     model.add_constraint({x:1,y:2},'>=',4);model.set_objective({x:1,y:1})

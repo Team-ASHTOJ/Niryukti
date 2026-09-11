@@ -6,3 +6,6 @@ __pycache__/
 *.egg-info/
 /datasets/refinery_large.*
 /datasets/numerical/
+
+/dashboard/browser-tests/node_modules/
+/dashboard/browser-tests/test-results/

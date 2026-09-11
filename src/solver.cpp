@@ -54,6 +54,7 @@ Result solve(const Model &m, const Options &o) {
 Result solve_continuous(const Model &original, const Options &o) {
     auto start = Clock::now();
     Result r;
+    Verifier verifier(original);
     r.status = "ITERATION_LIMIT";
     auto prep = prepare(original, o);
     r.preprocess_seconds = elapsed(start);
@@ -76,7 +77,7 @@ Result solve_continuous(const Model &original, const Options &o) {
             y[i] = o.initial_y[prep.rows[i]] / (prep.row_scale[i] * prep.objective_scale);
     r.x = prep.restore_x(x);
     r.y = prep.restore_y(y, original.rl.size());
-    r.accuracy = verify(original, r.x, r.y);
+    r.accuracy = verifier.evaluate(r.x, r.y);
     // Direct recession certificate for isolated linear columns, plus a checked feasible point.
     if (r.accuracy.finite && r.accuracy.primal_absolute == 0) {
         std::vector<bool> used(m.c.size(), false);
@@ -119,12 +120,23 @@ Result solve_continuous(const Model &original, const Options &o) {
         colmax = std::max(colmax, s);
     double norm = std::sqrt(rowmax) * std::sqrt(colmax);
     double step = norm > 0 ? .9 / norm : 1, weight = 1;
+    if (o.adaptive) {
+        long double c2 = 0, b2 = 0;
+        for (auto c : m.c)
+            c2 += (long double)c * c;
+        for (size_t i = 0; i < m.rl.size(); i++) {
+            double b = std::clamp(0., m.rl[i], m.ru[i]);
+            b2 += (long double)b * b;
+        }
+        if (c2 > 1e-24 && b2 > 1e-24)
+            weight = std::clamp(std::sqrt(double(c2 / b2)), 1e-4, 1e4);
+    }
     bool usecuda = o.device == "cuda" ||
                    (o.device == "auto" && cuda_available() && m.A.value.size() >= 100000);
     r.backend = usecuda ? "cuda" : "cpu";
     r.device_name = usecuda ? cuda_description() : "CPU";
     auto transfer = Clock::now();
-    auto backend = usecuda ? cuda_backend(m, x, y) : cpu_backend(m, x, y);
+    auto backend = usecuda ? cuda_backend(m, x, y, o.adaptive) : cpu_backend(m, x, y, o.adaptive);
     r.transfer_seconds = elapsed(transfer);
     double restart_kkt = r.accuracy.kkt;
     int64_t since_restart = 0;
@@ -140,17 +152,18 @@ Result solve_continuous(const Model &original, const Options &o) {
         }
         int count = int(std::min<int64_t>(o.check_every, o.iteration_limit - r.iterations));
         auto tick = Clock::now();
-        backend->advance(count, step / weight, step * weight);
+        int accepted = backend->advance(count, step / weight, step * weight);
         r.iteration_seconds += elapsed(tick);
-        r.iterations += count;
-        since_restart += count;
+        r.iterations += accepted;
+        since_restart += accepted;
+        r.rejected_steps = backend->rejected_steps();
         tick = Clock::now();
         std::vector<double> cx, cy, ax, ay;
         backend->candidates(cx, cy, ax, ay);
         auto ox = prep.restore_x(cx), oy = prep.restore_y(cy, original.rl.size());
-        auto ca = verify(original, ox, oy);
+        auto ca = verifier.evaluate(ox, oy, false);
         auto aox = prep.restore_x(ax), aoy = prep.restore_y(ay, original.rl.size());
-        auto aa = verify(original, aox, aoy);
+        auto aa = verifier.evaluate(aox, aoy, false);
         bool avg = aa.kkt < ca.kkt;
         if (avg) {
             cx.swap(ax);
@@ -174,6 +187,8 @@ Result solve_continuous(const Model &original, const Options &o) {
             r.message = "Nonfinite iterate or diagnostic";
             break;
         }
+        if (ca.kkt <= o.tol)
+            ca = verifier.evaluate(ox, oy);
         if (ca.kkt <= o.tol) {
             r.x = std::move(ox);
             r.y = std::move(oy);
@@ -181,8 +196,29 @@ Result solve_continuous(const Model &original, const Options &o) {
             r.status = "OPTIMAL";
             break;
         }
+        // A positive lower bound for the zero-objective feasibility problem is a
+        // contradiction: every feasible point has objective zero. Verify in original units.
+        if (r.iterations >= 1000 && ca.primal > o.tol) {
+            auto ray = oy;
+            double norm_y = 0;
+            for (double v : ray)
+                norm_y = std::max(norm_y, std::abs(v));
+            if (norm_y > 0) {
+                for (double &v : ray)
+                    v /= norm_y;
+                double margin = verifier.infeasibility_bound(ray);
+                if (margin > 0 && std::isfinite(margin)) {
+                    r.status = "INFEASIBLE";
+                    r.message = "Independently verified box/row Farkas certificate";
+                    r.infeasibility_ray = std::move(ray);
+                    r.certificate_margin = margin;
+                    break;
+                }
+            }
+        }
         if (o.restart && since_restart >= o.check_every * 2 &&
-            (ca.kkt < .5 * restart_kkt || since_restart >= 2000)) {
+            (ca.kkt < .5 * restart_kkt ||
+             since_restart >= std::max<int64_t>(2000, r.iterations / 2))) {
             if (o.adaptive) {
                 long double dx = 0, dy = 0;
                 for (size_t j = 0; j < cx.size(); j++)
@@ -203,7 +239,7 @@ Result solve_continuous(const Model &original, const Options &o) {
         }
     }
     auto check = Clock::now();
-    r.accuracy = verify(original, r.x, r.y);
+    r.accuracy = verifier.evaluate(r.x, r.y);
     r.verification_seconds += elapsed(check);
     if (r.status == "OPTIMAL" && (!r.accuracy.finite || r.accuracy.kkt > o.tol))
         r.status = "NUMERICAL_ERROR";

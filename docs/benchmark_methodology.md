@@ -23,3 +23,33 @@ Every selected instance appears, including parse errors, unavailable backends, n
 The cached Netlib set is a **small smoke suite**, not a complete benchmark campaign. See `datasets/manifest.json` for pinned upstream sources and checksums. Synthetic refinery instances measure sparse throughput and application plumbing; repeated periods are largely independent and are not representative of difficult coupled industrial scheduling. No real MRPL data is included.
 
 For reports, use an idle machine, a fixed Release binary, identical resource limits and enough repetitions to identify noise. The current report provides per-instance bars and tables. Shifted geometric means, Dolan–Moré profiles, memory profiling, CUDA-event breakdowns, full MIPLIB/QPLIB campaigns and benchmark caching remain Phase 2 work.
+
+## Phase 2 before/after comparison
+
+Keep the previous executable before rebuilding. Run the same explicit model list, repetitions, threads, tolerance and time limit against the preserved executable and then against the updated executable. Do not compile or run correctness/browser tests concurrently with the measured campaigns.
+
+The current nine-case list is `examples/refinery.json examples/dispatch.json examples/supply_chain.json examples/scheduling.json datasets/afiro.mps datasets/adlittle.mps datasets/israel.mps datasets/e226.mps datasets/refinery_large.mps`.
+
+```bash
+# Use the same model list for both commands below.
+.venv/bin/python benchmark/run.py MODEL_LIST \
+  --binary results/phase2/before/vantage --solvers cpu,cuda \
+  --runs 3 --threads 4 --time-limit 20 --output results/phase2-baseline
+.venv/bin/python benchmark/run.py MODEL_LIST \
+  --solvers cpu,cuda,highs --runs 3 --threads 4 --time-limit 20 \
+  --output results/phase2-final
+python3 benchmark/compare.py results/phase2-baseline results/phase2-final
+```
+
+Replace `MODEL_LIST` with the explicit list above. The generated `docs/phase2_results.md` includes all cases and links to raw artifacts. Comparison validates equal dataset checksums and common measurement settings. The dashboard uses a completed `phase2-final` campaign when present and otherwise retains the earlier campaigns. A summary file marks completion; partial folders must not replace the displayed comparison.
+
+For submission archiving, preserve both result directories and the source tree corresponding to each executable. A dirty git commit ID alone does not identify exact source contents. The retained executable hash identifies what was measured, even when uncommitted source changes exist.
+
+An explicitly separate iteration-budget experiment can be included without changing the standard statuses:
+
+```bash
+.venv/bin/python benchmark/run.py datasets/e226.mps --runs 3 --threads 4 \
+  --iterations 200000 --time-limit 20 --output results/phase2-e226-extended
+python3 benchmark/compare.py results/phase2-baseline results/phase2-final \
+  --extended results/phase2-e226-extended
+```

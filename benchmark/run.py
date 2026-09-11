@@ -28,9 +28,10 @@ def execute(command, timeout):
     except OSError as e:return dict(status='UNAVAILABLE',message=str(e)),'',str(e),None,time.perf_counter()-tick
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('models',nargs='+');p.add_argument('--binary',default=str(ROOT/'build/vantage'));p.add_argument('--solvers',default='cpu,cuda,highs');p.add_argument('--runs',type=int,default=3);p.add_argument('--time-limit',type=float,default=10);p.add_argument('--threads',type=int,default=1);p.add_argument('--tol',type=float,default=1e-6);p.add_argument('--output',default='results/latest');p.add_argument('--no-scaling',action='store_true');p.add_argument('--no-restart',action='store_true');p.add_argument('--no-adaptive',action='store_true')
+    p=argparse.ArgumentParser();p.add_argument('models',nargs='+');p.add_argument('--binary',default=str(ROOT/'build/vantage'));p.add_argument('--solvers',default='cpu,cuda,highs');p.add_argument('--runs',type=int,default=3);p.add_argument('--iterations',type=int,default=100000);p.add_argument('--time-limit',type=float,default=10);p.add_argument('--threads',type=int,default=1);p.add_argument('--tol',type=float,default=1e-6);p.add_argument('--output',default='results/latest');p.add_argument('--no-scaling',action='store_true');p.add_argument('--no-restart',action='store_true');p.add_argument('--no-adaptive',action='store_true')
     a=p.parse_args()
     if a.runs<1:p.error('--runs must be positive')
+    if a.iterations<1:p.error('--iterations must be positive')
     out=Path(a.output)
     if (out/'manifest.json').exists():
         archive=out.with_name(out.name+'-'+time.strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:6])
@@ -61,7 +62,7 @@ def main():
             for run in range(-1 if solver=='cuda' else 0,a.runs):
                 name=f'{tag}_{solver}_{"warmup" if run<0 else run}'
                 if solver in ('cpu','cuda'):
-                    command=[a.binary,'solve',str(path),'--device',solver,'--time-limit',str(a.time_limit),'--threads',str(a.threads),'--tol',str(a.tol)]
+                    command=[a.binary,'solve',str(path),'--device',solver,'--time-limit',str(a.time_limit),'--threads',str(a.threads),'--tol',str(a.tol),'--iterations',str(a.iterations)]
                     if a.no_scaling:command+=['--scaling-passes','0']
                     if a.no_restart:command+=['--no-restart']
                     if a.no_adaptive:command+=['--no-adaptive']

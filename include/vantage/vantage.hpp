@@ -47,14 +47,28 @@ struct Accuracy {
     double primal_absolute = inf, dual_absolute = inf, complementarity = inf, lower_bound = -inf;
     bool finite = false;
 };
+// Reuses sparse transpose and work vectors across independent candidate checks.
+// The model must outlive the verifier and remain unchanged.
+class Verifier {
+    const Model &model;
+    Sparse transpose;
+    std::vector<double> activity, transpose_product;
+
+  public:
+    explicit Verifier(const Model &model);
+    Accuracy evaluate(const std::vector<double> &x, const std::vector<double> &y,
+                      bool compute_safe_bound = true);
+    double infeasibility_bound(const std::vector<double> &y) const;
+};
 struct Result {
     std::string status = "UNKNOWN", message, backend = "cpu", device_name = "CPU";
-    std::vector<double> x, y;
+    std::vector<double> x, y, infeasibility_ray;
+    double certificate_margin = 0;
     Accuracy accuracy;
     double seconds = 0, preprocess_seconds = 0, transfer_seconds = 0, iteration_seconds = 0,
            verification_seconds = 0;
-    int64_t iterations = 0, restarts = 0, nodes = 0, nodes_remaining = 0, removed_columns = 0,
-            removed_rows = 0;
+    int64_t iterations = 0, restarts = 0, rejected_steps = 0, nodes = 0, nodes_remaining = 0,
+            removed_columns = 0, removed_rows = 0, bounds_tightened = 0;
     double best_bound = -inf, mip_gap = inf;
 };
 Model read_model(const std::string &path);

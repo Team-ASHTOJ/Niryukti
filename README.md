@@ -6,6 +6,14 @@ An independent sparse optimization engine for SIH26119, built in C++20 with an o
 
 **Research prototype:** numerical correctness is tested on representative cases; industrial robustness, general convex QP support, and competitive large-scale MILP performance remain development work. The name does not imply support for general nonconvex global optimization.
 
+## Dashboard
+
+```bash
+./scripts/run_dashboard.sh
+```
+
+Open **http://127.0.0.1:8080** for the local dashboard: solver overview, searchable benchmark comparisons, accuracy details, model library, live CPU/GPU solves, model import and downloadable results. The interface uses real saved measurements and the actual solver executable. See [dashboard documentation](dashboard/README.md).
+
 ## Run it
 
 ```bash
@@ -29,20 +37,21 @@ cmake --build build-cpu --parallel 4
 
 Requirements: CMake ≥3.24, a C++20 compiler, Python ≥3.10 for scripts. CUDA builds require the CUDA toolkit and a compatible host compiler. The build script selects GCC 15 when available; override CMake settings for other installations. GPU runtime tests run only when a usable CUDA device is present. Default arithmetic is FP64; unsafe fast-math is not enabled.
 
-## What works in Phase 1
+## What works in 0.2
 
 | Component | Implemented behavior |
 |---|---|
 | Independent solver core | Own PDHG updates, preprocessing, scaling, verification, and branch-and-bound |
 | Sparse matrices | COO construction with duplicate aggregation; CSR and explicit sparse transpose; 64-bit offsets and indices |
 | CPU and CUDA | Same algorithm; OpenMP CPU loops; cuSPARSE GPU SpMV and fused update/averaging kernels |
-| LP | Box-constrained interval-row PDHG, conservative norm-based steps, averaging, adaptive restart and primal/dual weighting |
+| LP | Box-constrained interval-row PDHG, adaptive trial-step control, weighted averaging, adaptive restart and primal/dual weighting |
 | Convex QP | Nonnegative **diagonal Q**, using an exact separable proximal update |
-| MILP | Best-bound search, most-fractional branching, warm relaxations, rounding and continuous repair, incumbent and global gap |
+| MILP | Best-bound search, most-fractional branching, conservative integer-bound propagation, warm relaxations, rounding/repair, incumbent and global gap |
 | Preprocessing | Fixed-variable and bounded isolated-column elimination, empty rows, row-activity infeasibility checks, reversible reconstruction |
 | Scaling | Iterative diagonal equilibration with original-space verification |
 | Input | MPS linear/integer sections and ranges; diagonal `QMATRIX`/`QUADOBJ`; documented LP text subset; native sparse JSON |
 | Verification | Original objective, row/bound feasibility, integrality, projected stationarity, complementarity, and Lagrangian lower bound |
+| Infeasibility certificates | Independently verified box/row Farkas rays, saved as JSON and replayable through `verify` |
 | API and CLI | C++ library, Python subprocess API, solve/inspect/explain/verify/convert/devices commands |
 | Demonstration | Synthetic refinery blending LP, refinery scheduling MILP, supply-chain MILP, and power-dispatch QP |
 | Benchmarks | External HiGHS adapter, CPU/CUDA comparisons, raw runs including failures, checksums, offline HTML and CSV |
@@ -101,16 +110,20 @@ python3 examples/generate.py --crudes 16 --products 8 --periods 365 \
   --runs 3 --threads 4 --time-limit 60 --output results/scalability
 ```
 
-The larger example has 46,720 variables and 186,880 nonzeros. It is synthetic and largely separable by period; it is a sparse-computation demonstration, not evidence of realistic industrial scheduling difficulty. Request bigger dimensions for scalability experiments, with appropriate memory limits.
+The larger example has 46,720 variables and 186,515 nonzeros. It is synthetic and largely separable by period; it is a sparse-computation demonstration, not evidence of realistic industrial scheduling difficulty. Request bigger dimensions for scalability experiments, with appropriate memory limits.
 
 Read [`docs/benchmark_methodology.md`](docs/benchmark_methodology.md) before interpreting timing ratios. Reports retain unsuccessful runs. A lower primal objective alone is not a win: feasibility, tolerances, gap, and model class matter.
 
-The measured results and test evidence are recorded in [the Phase 1 validation snapshot](docs/validation.md), including the instances that reached limits.
+The [Phase 2 measured comparison](docs/phase2_results.md) records 8/9 selected cases solved by both VANTAGE backends versus 9/9 by HiGHS, including the remaining e226 limit and ADLITTLE GPU regression. A separate 200,000-iteration experiment solves e226 on CPU/CUDA in all three repetitions; it does not replace the standard-budget result. The [Phase 1 snapshot](docs/validation.md) remains available as historical evidence.
 
 ## Limits and next phase
 
-General/off-diagonal Q, MIQP, nonlinear models, general infeasibility/recession rays, simplex/IPM, advanced presolve propagation, cuts, pseudo-cost branching, persistent GPU contexts, and checkpoints are not implemented. MILP may return a feasible incumbent with an unresolved gap. Time limits are checked between iteration chunks; preprocessing, verification, and a chunk may overrun the requested limit.
+General/off-diagonal Q, MIQP, nonlinear models, general recession rays and comprehensive infeasibility detection, simplex/IPM, general continuous presolve propagation, cuts, pseudo-cost branching, persistent GPU contexts, and checkpoints are not implemented. MILP may return a feasible incumbent with an unresolved gap. Time limits are checked between iteration chunks; preprocessing, verification, and a chunk may overrun the requested limit.
 
-GPU arrays remain resident between checks; full current and averaged iterates are copied to CPU for periodic independent verification. This is correct and testable but expensive. GPU-side residual reductions and a reusable verification workspace are important next steps. No GPU speed advantage over HiGHS is assumed.
+GPU arrays remain resident between checks; full current and averaged iterates are copied to CPU for periodic independent verification. This is correct and testable but expensive. Verification now reuses its transpose and workspace. GPU-side full residual monitoring and persistent GPU contexts remain next steps. No GPU speed advantage over HiGHS is assumed.
 
 See [architecture](docs/architecture.md), [mathematics](docs/algorithms.md), [formats](docs/supported_formats.md), [Phase 2 work](docs/phase2.md), and [dependency policy](docs/dependency_policy.md).
+
+## Documentation for development and submissions
+
+The [documentation index](docs/README.md) links the [development log](docs/development_log.md), mathematical explanations, validation records and a [presentation/submission evidence guide](docs/presentation_evidence.md). Preliminary experiments are labeled separately from reproducible benchmark results.

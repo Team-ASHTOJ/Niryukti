@@ -44,6 +44,34 @@ int main() {
         m.c = {1, 1};
         m.rl = {4};
         optimum(m, 2);
+        // Cached and one-shot verification must agree, including conservative bounds.
+        auto base_result = solve(m);
+        Verifier cached(m);
+        auto cached_accuracy = cached.evaluate(base_result.x, base_result.y);
+        auto fresh_accuracy = verify(m, base_result.x, base_result.y);
+        require(cached_accuracy.kkt == fresh_accuracy.kkt &&
+                    cached_accuracy.lower_bound == fresh_accuracy.lower_bound,
+                "cached verifier agreement");
+        require(cached.evaluate(base_result.x, base_result.y, false).lower_bound == -inf,
+                "monitoring cannot supply an MILP pruning bound");
+        auto wide = make(1, 1, {{0, 0, 1}});
+        wide.rl = {1};
+        wide.ru = {1e15};
+        require(verify(wide, {0}, {0}).primal >= .5,
+                "large opposite endpoint cannot hide violation");
+        auto contradiction = make(2, 2, {{0, 0, 1}, {0, 1, 1}, {1, 0, 1}, {1, 1, 1}});
+        contradiction.rl = {3, -inf};
+        contradiction.ru = {inf, 1};
+        Verifier certificate_check(contradiction);
+        require(certificate_check.infeasibility_bound({-1, 1}) > 1.9, "positive Farkas margin");
+        require(certificate_check.infeasibility_bound({1, -1}) <= 0,
+                "invalid Farkas signs rejected");
+        require(certificate_check.infeasibility_bound({0, 0}) <= 0,
+                "zero ray cannot prove infeasibility");
+        auto infeasible_result = solve(contradiction);
+        require(infeasible_result.status == "INFEASIBLE" &&
+                    certificate_check.infeasibility_bound(infeasible_result.infeasibility_ray) > 0,
+                "solver returns independently replayable infeasibility ray");
         auto sparse = Sparse::build(2, 2, {{0, 0, 2}, {0, 0, -1}, {1, 1, 3}});
         require(sparse.multiply({2, 4}) == std::vector<double>({2, 12}), "duplicate COO reduction");
         require(sparse.transpose().multiply({2, 4}) == std::vector<double>({2, 12}), "transpose");
@@ -177,10 +205,49 @@ int main() {
             }
             optimum(mip, best);
         }
+        // Multiple signed rows and integer domains exercise propagation independently
+        // against exhaustive enumeration (not against the propagation implementation).
+        for (int instance = 0; instance < 30; instance++) {
+            std::vector<Entry> entries;
+            auto mip = make(3, 3, {});
+            mip.lb.assign(3, -2);
+            mip.ub.assign(3, 2);
+            mip.types.assign(3, VarType::Integer);
+            for (int j = 0; j < 3; j++)
+                mip.c[j] = int(rng() % 9) - 4;
+            for (int i = 0; i < 3; i++) {
+                mip.rl[i] = -double(1 + rng() % 5);
+                mip.ru[i] = double(1 + rng() % 5);
+                for (int j = 0; j < 3; j++)
+                    entries.push_back({i, j, double(int(rng() % 7) - 3)});
+            }
+            mip.A = Sparse::build(3, 3, entries);
+            double best = inf;
+            for (int x = -2; x <= 2; x++)
+                for (int y = -2; y <= 2; y++)
+                    for (int z = -2; z <= 2; z++) {
+                        std::vector<double> point = {double(x), double(y), double(z)};
+                        auto activity = mip.A.multiply(point);
+                        bool feasible = true;
+                        for (int i = 0; i < 3; i++)
+                            feasible &= activity[i] >= mip.rl[i] && activity[i] <= mip.ru[i];
+                        if (feasible)
+                            best = std::min(best, mip.c[0] * x + mip.c[1] * y + mip.c[2] * z);
+                    }
+            optimum(mip, best);
+        }
         if (cuda_available()) {
             Options gpu;
             gpu.device = "cuda";
             optimum(m, 2, gpu);
+            auto cuda_infeasible = solve(contradiction, gpu);
+            require(cuda_infeasible.status == "INFEASIBLE" &&
+                        certificate_check.infeasibility_bound(cuda_infeasible.infeasibility_ray) >
+                            0,
+                    "CUDA infeasibility certificate");
+            gpu.adaptive = false;
+            optimum(m, 2, gpu);
+            gpu.adaptive = true;
             optimum(qp, 8, gpu);
             optimum(fixed, 2.5, gpu);
             optimum(free, -2, gpu);

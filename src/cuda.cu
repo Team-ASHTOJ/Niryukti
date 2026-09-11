@@ -80,40 +80,136 @@ struct Vector {
             cusparseDestroyDnVec(d);
     }
 };
-__global__ void primal(int64_t n, double *x, double *xb, const double *aty, const double *c,
-                       const double *q, const double *l, const double *u, double tau, double *avg,
-                       double w) {
+
+// State: step factor, averaging mass, accepted count, rejected count, accept flag, average weight.
+// Trial decisions and reductions stay on the device; only six scalars return per monitoring chunk.
+__device__ double block_sum(double value) {
+    __shared__ double scratch[256];
+    int t = threadIdx.x;
+    scratch[t] = value;
+    __syncthreads();
+    for (int stride = 128; stride; stride /= 2) {
+        if (t < stride)
+            scratch[t] += scratch[t + stride];
+        __syncthreads();
+    }
+    double answer = scratch[0];
+    __syncthreads();
+    return answer;
+}
+__global__ void primal_trial(int64_t n, const double *x, double *trial, double *xb,
+                             const double *aty, const double *c, const double *q, const double *l,
+                             const double *u, double base_tau, const double *state,
+                             double *partial) {
     auto j = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+    double square = 0;
     if (j < n) {
+        double tau = base_tau * state[0];
         double v = fmin(u[j], fmax(l[j], (x[j] - tau * (c[j] + aty[j])) / (1 + tau * q[j])));
+        trial[j] = v;
         xb[j] = 2 * v - x[j];
-        x[j] = v;
-        avg[j] += (v - avg[j]) * w;
+        square = (v - x[j]) * (v - x[j]);
+        if (!isfinite(v))
+            square = INFINITY;
+    }
+    double sum = block_sum(square);
+    if (!threadIdx.x)
+        partial[blockIdx.x] = sum;
+}
+__global__ void dual_trial(int64_t n, const double *y, double *trial, const double *bar,
+                           const double *previous_ax, const double *l, const double *u,
+                           double base_sigma, const double *state, double *partial,
+                           double *couplings) {
+    auto i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+    double square = 0, coupling = 0;
+    if (i < n) {
+        double sigma = base_sigma * state[0];
+        double z = y[i] + sigma * bar[i];
+        double v = fmax(0., z - sigma * u[i]) + fmin(0., z - sigma * l[i]);
+        trial[i] = v;
+        double dy = v - y[i];
+        square = dy * dy;
+        coupling = dy * (bar[i] - previous_ax[i]) * .5;
+        if (!isfinite(v) || !isfinite(bar[i]))
+            square = INFINITY;
+    }
+    double s = block_sum(square), c = block_sum(coupling);
+    if (!threadIdx.x) {
+        partial[blockIdx.x] = s;
+        couplings[blockIdx.x] = c;
     }
 }
-__global__ void dual(int64_t n, double *y, const double *ax, const double *l, const double *u,
-                     double sigma, double *avg, double w) {
+__global__ void decide(int nx, int ny, const double *dx, const double *dy, const double *cross,
+                       double tau, double sigma, bool adaptive, double *state) {
+    double p = 0, d = 0, c = 0;
+    for (int i = threadIdx.x; i < nx; i += 256)
+        p += dx[i];
+    for (int i = threadIdx.x; i < ny; i += 256) {
+        d += dy[i];
+        c += cross[i];
+    }
+    p = block_sum(p);
+    d = block_sum(d);
+    c = block_sum(c);
+    if (!threadIdx.x) {
+        double factor = state[0];
+        double energy = p / (tau * factor) + d / (sigma * factor);
+        double limit = fabs(c) > 0 ? energy / (2 * fabs(c)) : INFINITY;
+        bool finite = isfinite(energy) && isfinite(c);
+        bool accept = finite && (!adaptive || limit >= 1);
+        if (adaptive) {
+            double k = state[2] + 2;
+            double multiplier = fmin((1 - pow(k, -.3)) * limit, 1 + pow(k, -.6));
+            if (!finite || !isfinite(multiplier) || multiplier <= 0)
+                multiplier = .5;
+            state[0] = fmin(1e12, fmax(1e-12, factor * multiplier));
+        }
+        state[4] = accept;
+        if (accept) {
+            state[1] += factor;
+            state[2] += 1;
+            state[5] = factor / state[1];
+        } else
+            state[3] += 1;
+    }
+}
+__global__ void commit_primal(int64_t n, double *x, const double *trial, double *avg,
+                              const double *state) {
+    auto j = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (j < n && state[4]) {
+        x[j] = trial[j];
+        avg[j] += (x[j] - avg[j]) * state[5];
+    }
+}
+__global__ void commit_dual(int64_t n, double *y, const double *trial, double *avg,
+                            double *previous_ax, const double *bar, const double *state) {
     auto i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
-    if (i < n) {
-        double z = y[i] + sigma * ax[i];
-        double v = fmax(0., z - sigma * u[i]) + fmin(0., z - sigma * l[i]);
-        y[i] = v;
-        avg[i] += (v - avg[i]) * w;
+    if (i < n && state[4]) {
+        y[i] = trial[i];
+        avg[i] += (y[i] - avg[i]) * state[5];
+        previous_ax[i] = .5 * (previous_ax[i] + bar[i]);
     }
 }
 class CudaBackend final : public IterationBackend {
     Handle handle;
     Matrix a, at;
     Buffer<double> x, y, xb, xa, ya, ax, aty, c, q, lb, ub, rl, ru;
+    Buffer<double> trial_x, trial_y, previous_ax, dx, dy, cross, state;
+    bool adaptive;
+    int64_t accepted = 0, rejected = 0;
+    int empty_chunks = 0;
     Vector vx, vy, vax, vaty;
     std::unique_ptr<Buffer<char>> workspace;
-    int64_t samples = 0;
 
   public:
-    CudaBackend(const Model &m, const std::vector<double> &px, const std::vector<double> &py)
+    CudaBackend(const Model &m, const std::vector<double> &px, const std::vector<double> &py,
+                bool adapt)
         : a(m.A), at(m.A.transpose()), x(px), y(py), xb(px), xa(px.size()), ya(py.size()),
           ax(py.size()), aty(px.size()), c(m.c), q(m.q), lb(m.lb), ub(m.ub), rl(m.rl), ru(m.ru),
-          vx(xb.n, xb.p), vy(y.n, y.p), vax(ax.n, ax.p), vaty(aty.n, aty.p) {
+          trial_x(px.size()), trial_y(py.size()), previous_ax(m.A.multiply(px)),
+          dx((px.size() + 255) / 256), dy((py.size() + 255) / 256), cross((py.size() + 255) / 256),
+          state(std::vector<double>{1, 0, 0, 0, 0, 0}), adaptive(adapt), vx(xb.n, xb.p),
+          vy(y.n, y.p), vax(ax.n, ax.p), vaty(aty.n, aty.p) {
         xa.zero();
         ya.zero();
         ax.zero();
@@ -132,29 +228,48 @@ class CudaBackend final : public IterationBackend {
         }
         workspace = std::make_unique<Buffer<char>>(std::max(s1, s2));
     }
-    void advance(int count, double tau, double sigma) override {
+
+    int64_t rejected_steps() const override {
+        return rejected;
+    }
+    int advance(int count, double tau, double sigma) override {
         double one = 1, zero = 0;
         for (int i = 0; i < count; i++) {
-            double w = 1. / ++samples;
             if (a.values.n)
                 sparse_check(cusparseSpMV(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE, &one, at.d,
                                           vy.d, &zero, vaty.d, CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG2,
                                           workspace->p),
                              "SpMV At*y");
             if (x.n)
-                primal<<<(x.n + 255) / 256, 256>>>(x.n, x.p, xb.p, aty.p, c.p, q.p, lb.p, ub.p, tau,
-                                                   xa.p, w);
-            check(cudaGetLastError(), "primal kernel");
+                primal_trial<<<dx.n, 256>>>(x.n, x.p, trial_x.p, xb.p, aty.p, c.p, q.p, lb.p, ub.p,
+                                            tau, state.p, dx.p);
+            check(cudaGetLastError(), "primal trial kernel");
             if (a.values.n)
                 sparse_check(cusparseSpMV(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE, &one, a.d,
                                           vx.d, &zero, vax.d, CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG2,
                                           workspace->p),
-                             "SpMV A*x");
+                             "SpMV A*xbar");
             if (y.n)
-                dual<<<(y.n + 255) / 256, 256>>>(y.n, y.p, ax.p, rl.p, ru.p, sigma, ya.p, w);
-            check(cudaGetLastError(), "dual kernel");
+                dual_trial<<<dy.n, 256>>>(y.n, y.p, trial_y.p, ax.p, previous_ax.p, rl.p, ru.p,
+                                          sigma, state.p, dy.p, cross.p);
+            check(cudaGetLastError(), "dual trial kernel");
+            decide<<<1, 256>>>(dx.n, dy.n, dx.p, dy.p, cross.p, tau, sigma, adaptive, state.p);
+            check(cudaGetLastError(), "step decision kernel");
+            if (x.n)
+                commit_primal<<<dx.n, 256>>>(x.n, x.p, trial_x.p, xa.p, state.p);
+            if (y.n)
+                commit_dual<<<dy.n, 256>>>(y.n, y.p, trial_y.p, ya.p, previous_ax.p, ax.p, state.p);
+            check(cudaGetLastError(), "commit kernels");
         }
-        check(cudaDeviceSynchronize(), "PDHG chunk synchronize");
+        std::vector<double> counters;
+        state.download(counters); // Synchronizes this monitoring chunk, not every trial.
+        int progress = int(int64_t(counters[2]) - accepted);
+        accepted = int64_t(counters[2]);
+        rejected = int64_t(counters[3]);
+        empty_chunks = progress ? 0 : empty_chunks + 1;
+        if (empty_chunks >= 4 || (!adaptive && progress != count))
+            throw std::runtime_error("CUDA PDHG backtracking stalled or produced nonfinite steps");
+        return progress;
     }
     void candidates(std::vector<double> &px, std::vector<double> &py, std::vector<double> &pax,
                     std::vector<double> &pay) override {
@@ -169,7 +284,17 @@ class CudaBackend final : public IterationBackend {
         y.upload(py);
         xa.zero();
         ya.zero();
-        samples = 0;
+        // Recompute A*x at restarts to avoid accumulated recurrence roundoff.
+        double one = 1, zero = 0;
+        if (a.values.n) {
+            sparse_check(cusparseSpMV(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE, &one, a.d, vx.d,
+                                      &zero, vax.d, CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG2,
+                                      workspace->p),
+                         "restart A*x");
+            check(cudaMemcpy(previous_ax.p, ax.p, ax.n * sizeof(double), cudaMemcpyDeviceToDevice),
+                  "restart activity");
+        }
+        check(cudaMemset(state.p + 1, 0, sizeof(double)), "reset averaging mass");
     }
 };
 } // namespace
@@ -185,13 +310,13 @@ std::string cuda_description() {
     return std::string(p.name) + " (" + std::to_string(p.totalGlobalMem / (1024 * 1024)) + " MiB)";
 }
 std::unique_ptr<IterationBackend> cuda_backend(const Model &m, const std::vector<double> &x,
-                                               const std::vector<double> &y) {
+                                               const std::vector<double> &y, bool adaptive) {
     size_t free = 0, total = 0;
     check(cudaMemGetInfo(&free, &total), "cudaMemGetInfo");
-    long double estimate = 48.L * m.A.value.size() + 128.L * (m.A.rows + m.A.cols + 2);
+    long double estimate = 48.L * m.A.value.size() + 192.L * (m.A.rows + m.A.cols + 2);
     if (estimate > .8L * free)
         throw std::runtime_error(
             "Estimated GPU storage exceeds 80% of available memory; use --device cpu");
-    return std::make_unique<CudaBackend>(m, x, y);
+    return std::make_unique<CudaBackend>(m, x, y, adaptive);
 }
 } // namespace vantage
