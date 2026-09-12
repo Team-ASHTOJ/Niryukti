@@ -1,4 +1,5 @@
 #include "internal.hpp"
+#include <iostream>
 #include <stdexcept>
 namespace vantage {
 class CpuBackend final : public IterationBackend {
@@ -62,7 +63,7 @@ class CpuBackend final : public IterationBackend {
                 double limit = std::abs(coupling) > 0 ? energy / (2 * std::abs(coupling)) : inf;
                 bool finite = std::isfinite(energy) && std::isfinite(coupling);
                 double used_factor = factor;
-                bool accept = finite && (!adaptive || limit >= 1);
+                bool accept = finite && (!adaptive || limit >= 0.5);
                 if (adaptive) {
                     double k = double(accepted + 2);
                     double multiplier =
@@ -72,6 +73,17 @@ class CpuBackend final : public IterationBackend {
                     factor = std::clamp(factor * multiplier, 1e-12, 1e12);
                 }
                 if (!accept) {
+                    if (attempt < 5) {
+                        std::cerr << "PDHG reject: attempt=" << attempt
+                                  << " factor=" << factor
+                                  << " tau=" << tau
+                                  << " sigma=" << sigma
+                                  << " energy=" << energy
+                                  << " coupling=" << coupling
+                                  << " limit=" << limit
+                                  << " finite=" << finite
+                                  << "\\n";
+                    }
                     rejected++;
                     if (!adaptive)
                         throw std::runtime_error("Nonfinite PDHG step");

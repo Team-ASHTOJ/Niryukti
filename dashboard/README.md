@@ -25,3 +25,17 @@ node dashboard/browser-tests/check.cjs
 ```
 
 The browser check uses `/opt/google/chrome/chrome` by default; override `CHROME_PATH` and `DASHBOARD_URL` for another installation. It checks desktop/mobile layouts, navigation, filtering, details, a real solve, model import and solution download. `python3 -m unittest discover -s dashboard/tests` checks the API and benchmark aggregation.
+
+## Instrumentation interface
+
+The dashboard uses a shared obsidian/cyan design system, locally bundled fonts, CSS perspective geometry, and SVG plots. No WebGL renderer or new runtime dependencies are required. The **Effects** button persists a local preference that disables decorative motion and the computational background. System reduced-motion preferences also disable animations.
+
+Navigation includes run history, import, verification, hardware, diagnostics and in-app documentation alongside the original overview, solver, library and benchmark views. The solver cockpit displays real result fields and a logarithmic envelope of logged primal, dual and gap values. MILP relaxation logs are not plotted as global convergence. Refinery and branch-tree diagrams are explicitly illustrative; dispatch bars use the returned solution vector. GPU utilization, memory, search topology and separate independent recomputation are marked unavailable or omitted where the API does not expose them.
+
+Benchmark plots use actual recorded medians. Cactus and scatter plots include optimal results only; performance profiles retain unsolved cases in their denominator. Empty datasets remain empty rather than receiving example values. Expanded browser validation covers all routes at 390, 1440, 1920 and 2560 pixel widths, effect preferences, reduced motion, and real LP/QP/MILP runs.
+
+Brand artwork is supplied in `static/logo.png`; `brand.svg` and `favicon.svg` embed the unchanged image in cropped SVG viewports for navbar and icon use. Replace/regenerate these wrappers together when changing the source logo.
+
+The overview’s asymmetric grid, diamond textures, hatched comparison bars and one-time tile entrances adapt the supplied [Zepa UI any-grid](https://zepa.design/components/any-grid) reference. Attribution is retained in source. Layout and action highlights stay stable, measurements never scramble, and entrance effects use an intersection observer without a continuous rendering loop. These shared treatments also apply to the model library and analysis panels.
+
+The sticky top navigation adapts the supplied [Zepa UI cohort-navbar](https://zepa.design/components/cohort-navbar) reference, with VANTAGE routes, a Workspace mega menu, hover/focus previews, and a collapsible tablet/mobile menu. Dropdowns support click, keyboard entry, Escape, and outside-click dismissal. No React or external image dependencies were added.
