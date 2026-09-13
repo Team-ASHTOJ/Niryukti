@@ -1,70 +1,65 @@
-/* Visual inspiration: Zepa UI wave-hero, https://zepa.design/components/wave-hero.
-   Original reference credited to franky-adl (2026), MIT, fluid-cursor-demo.
-   This dependency-free SVG implementation uses finite, event-triggered ripples. */
 'use strict';
-window.VantageWave=(()=>{
-  let cleanup=()=>{};
-  function mount(host,allowed){
-    cleanup();
-    if(!host)return;
-    const ns='http://www.w3.org/2000/svg';
-    const svg=document.createElementNS(ns,'svg');
-    svg.setAttribute('viewBox','0 0 500 340');svg.setAttribute('aria-hidden','true');
-    svg.classList.add('wave-field');
-    const tiles=[],animations=new Set();
-    for(let row=0;row<12;row++)for(let column=0;column<12;column++){
-      const x=250+(column-row)*20,y=45+(column+row)*10;
-      const group=document.createElementNS(ns,'g');
-      const depth=13;
-      const faces=[
-        [`M${x-18} ${y}l18 9v${depth}l-18 -9Z`,'wave-left'],
-        [`M${x+18} ${y}l-18 9v${depth}l18 -9Z`,'wave-right'],
-        [`M${x} ${y-9}l18 9-18 9-18 -9Z`,'wave-top']
-      ];
-      for(const [d,className] of faces){const path=document.createElementNS(ns,'path');path.setAttribute('d',d);path.setAttribute('class',className);group.append(path);}
-      svg.append(group);tiles.push({group,x,y});
+// Visual inspiration: Zepa UI wave-hero, originally by @franky-adl (MIT).
+// https://zepa.design/components/wave-hero
+// Independent lightweight Canvas 2D implementation; no simulation telemetry.
+(()=>{
+  let dispose=()=>{};
+  const reduced=matchMedia('(prefers-reduced-motion: reduce)');
+  function mount(){
+    dispose();
+    const canvas=document.querySelector('[data-page="overview"] .wave-grid');
+    if(!canvas)return;
+    const ctx=canvas.getContext('2d');if(!ctx)return;
+    const host=canvas.parentElement;
+    let timer=0,visible=false,phase=0,lastPointer=0;
+    const ripples=[];
+    function allowed(){return visible&&!document.hidden&&effectsEnabled&&!reduced.matches&&(!state.job||state.job.state==='finished');}
+    function face(points,color){
+      ctx.fillStyle=color;ctx.beginPath();points.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.closePath();ctx.fill();
     }
-    host.prepend(svg);
-    let visible=false,last=-Infinity;
-    const stop=()=>{for(const animation of animations)animation.cancel();animations.clear();};
-    const ripple=(x,y)=>{
-      if(!visible||!allowed()||document.hidden||performance.now()-last<1100)return;
-      last=performance.now();
-      for(const tile of tiles){
-        const distance=Math.hypot(tile.x-x,(tile.y-y)*1.5);
-        const lift=12*Math.exp(-distance/350);
-        const animation=tile.group.animate([
-          {transform:'translateY(0)',opacity:1},
-          {transform:`translateY(-${lift}px)`,opacity:1,offset:.4},
-          {transform:'translateY(0)',opacity:1}
-        ],{duration:650,delay:distance*1.5,easing:'ease-in-out'});
-        animations.add(animation);animation.onfinish=()=>animations.delete(animation);
+    function draw(animated=false){
+      ctx.clearRect(0,0,640,360);
+      for(let row=0;row<16;row++)for(let col=0;col<16;col++){
+        const x=320+(col-row)*18,y=32+(col+row)*8;
+        let wave=animated?Math.sin(Math.hypot(col-7.5,row-7.5)*.85-phase*1.4)*4:0;
+        for(const ripple of ripples){
+          const age=phase-ripple.at,distance=Math.hypot(col-ripple.x,row-ripple.y);
+          wave+=Math.exp(-((distance-age*6)**2)/5)*Math.exp(-age)*14;
+        }
+        const height=9+Math.max(-3,wave),top=y-height;
+        face([[x-16,top],[x,top+7],[x,y+7],[x-16,y]],'#163b50');
+        face([[x,top+7],[x+16,top],[x+16,y],[x,y+7]],'#0c2538');
+        face([[x,top-7],[x+16,top],[x,top+7],[x-16,top]],`rgb(${30+height},${65+height*2},${85+height*3})`);
       }
-    };
-    const move=e=>{
-      if(e.pointerType==='touch')return;
-      const rect=svg.getBoundingClientRect();
-      // Account for SVG's centered, aspect-preserving viewport.
-      const scale=Math.min(rect.width/500,rect.height/340);
-      if(!scale)return;
-      ripple((e.clientX-rect.left-(rect.width-500*scale)/2)/scale,(e.clientY-rect.top-(rect.height-340*scale)/2)/scale);
-    };
-    const observer=new IntersectionObserver(entries=>{
-      visible=entries[0].isIntersecting;
-      if(visible)ripple(250,150);else stop();
-    },{threshold:.2});observer.observe(host);
-    const motion=matchMedia('(prefers-reduced-motion: reduce)');
-    host.addEventListener('pointermove',move);
-    document.addEventListener('visibilitychange',stop);
-    document.addEventListener('submit',stop,true);
-    document.querySelector('#effects-toggle').addEventListener('click',stop);
-    motion.addEventListener('change',stop);
-    cleanup=()=>{
-      stop();observer.disconnect();host.removeEventListener('pointermove',move);
-      document.removeEventListener('visibilitychange',stop);document.removeEventListener('submit',stop,true);
-      document.querySelector('#effects-toggle').removeEventListener('click',stop);
-      motion.removeEventListener('change',stop);svg.remove();
+    }
+    function frame(){
+      timer=0;
+      if(!allowed()){draw();return;}
+      phase+=1/24;
+      while(ripples.length&&phase-ripples[0].at>3)ripples.shift();
+      draw(true);timer=setTimeout(frame,1000/24);
+    }
+    function sync(){clearTimeout(timer);timer=0;ripples.length=0;if(allowed())frame();else draw();}
+    function pointer(e){
+      if(!allowed()||performance.now()-lastPointer<100)return;
+      lastPointer=performance.now();
+      const rect=canvas.getBoundingClientRect();
+      const x=(e.clientX-rect.left)/rect.width*640-320,y=(e.clientY-rect.top)/rect.height*360-32;
+      ripples.push({x:(y/8+x/18)/2,y:(y/8-x/18)/2,at:phase});
+      if(ripples.length>6)ripples.shift();
+    }
+    const observer=new IntersectionObserver(([entry])=>{visible=entry.isIntersecting;sync();},{threshold:.1});observer.observe(canvas);
+    host.addEventListener('pointermove',pointer,{passive:true});
+    document.addEventListener('visibilitychange',sync);
+    document.addEventListener('solver-state',sync);
+    document.querySelector('#effects-toggle').addEventListener('click',sync);
+    reduced.addEventListener('change',sync);
+    draw();
+    dispose=()=>{
+      clearTimeout(timer);observer.disconnect();host.removeEventListener('pointermove',pointer);
+      document.removeEventListener('visibilitychange',sync);document.removeEventListener('solver-state',sync);
+      document.querySelector('#effects-toggle').removeEventListener('click',sync);reduced.removeEventListener('change',sync);
     };
   }
-  return {mount,dispose:()=>{cleanup();cleanup=()=>{};}};
+  window.VantageWave={mount,dispose:()=>dispose()};
 })();
