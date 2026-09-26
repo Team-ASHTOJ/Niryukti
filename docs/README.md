@@ -1,4 +1,4 @@
-# VANTAGE documentation
+# NIRYUKTI documentation
 
 Start here when preparing explanations, slides, submissions, or further research.
 

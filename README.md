@@ -1,8 +1,8 @@
-# VANTAGE
+# NIRYUKTI
 
-**Vector-Accelerated Numerical Toolkit for Advanced Global Optimization**
+**Independent Sparse Optimization Engine**
 
-An independent sparse optimization engine for SIH26119, built in C++20 with an optional CUDA backend. The first prototype solves LPs, separable convex QPs, and small MILPs using its own numerical algorithms. No existing optimization solver is used to solve a VANTAGE model.
+An independent sparse optimization engine for SIH26119, built in C++20 with an optional CUDA backend. The first prototype solves LPs, separable convex QPs, and small MILPs using its own numerical algorithms. No existing optimization solver is used to solve a NIRYUKTI model.
 
 **Research prototype:** numerical correctness is tested on representative cases; industrial robustness, general convex QP support, and competitive large-scale MILP performance remain development work. The name does not imply support for general nonconvex global optimization.
 
@@ -116,7 +116,7 @@ Read [`docs/benchmark_methodology.md`](docs/benchmark_methodology.md) before int
 
 Opt-in research features include combined scaling, CPU Halpern/restarted/reflected Halpern LP methods, PID weighting, power estimates, LP feasibility polishing, reliability branching, binary cover/clique cuts, and feasibility-pump/RINS heuristics. The default remains PDHG with Ruiz scaling and most-fractional branching. See [research integration and validation](docs/research_features.md) for examples, supported combinations, source references and remaining work.
 
-The [Phase 2 measured comparison](docs/phase2_results.md) records 8/9 selected cases solved by both VANTAGE backends versus 9/9 by HiGHS, including the remaining e226 limit and ADLITTLE GPU regression. A separate 200,000-iteration experiment solves e226 on CPU/CUDA in all three repetitions; it does not replace the standard-budget result. The [Phase 1 snapshot](docs/validation.md) remains available as historical evidence.
+The [Phase 2 measured comparison](docs/phase2_results.md) records 8/9 selected cases solved by both NIRYUKTI backends versus 9/9 by HiGHS, including the remaining e226 limit and ADLITTLE GPU regression. A separate 200,000-iteration experiment solves e226 on CPU/CUDA in all three repetitions; it does not replace the standard-budget result. The [Phase 1 snapshot](docs/validation.md) remains available as historical evidence.
 
 ## Limits and next phase
 

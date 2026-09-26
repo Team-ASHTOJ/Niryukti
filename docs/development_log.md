@@ -1,4 +1,4 @@
-# VANTAGE engineering record
+# NIRYUKTI engineering record
 
 This is the working record for implementation, experiments and decisions. It distinguishes preliminary observations from repeatable benchmark evidence. The official SIH26119 statement governs scope; the supplied AI plans are suggestions.
 
@@ -56,7 +56,7 @@ For submission preparation, use [presentation_evidence.md](presentation_evidence
 
 ### Phase 2 measured outcome and dashboard integration
 
-The complete matched campaigns are archived under `results/phase2-baseline` and `results/phase2-final`; [the generated table](phase2_results.md) records hashes, timestamps, settings and every result. Both VANTAGE backends improve from 6/9 to 8/9 cases optimal in all three repetitions. HiGHS solves 9/9. Worst relative objective difference among optimal VANTAGE runs is 1.26488e-7.
+The complete matched campaigns are archived under `results/phase2-baseline` and `results/phase2-final`; [the generated table](phase2_results.md) records hashes, timestamps, settings and every result. Both NIRYUKTI backends improve from 6/9 to 8/9 cases optimal in all three repetitions. HiGHS solves 9/9. Worst relative objective difference among optimal NIRYUKTI runs is 1.26488e-7.
 
 Large synthetic LP median end-to-end times: old CPU 18.128 s → new CPU 1.297 s; old GPU 11.785 s → new GPU 1.065 s. Current HiGHS is 0.661 s. GPU is 1.22× faster than our current CPU on this case, but slower than HiGHS. These shared-laptop measurements include variability; use the raw repetition spread when discussing speed.
 
@@ -76,7 +76,7 @@ The dashboard now exposes iteration budget (default 100,000, maximum 2,000,000) 
 
 ### Extended-budget repetition check completed
 
-`results/phase2-e226-extended` uses the identical 0.2 executable, 200,000 VANTAGE iterations, 20 s, 4 threads and three measured runs per backend. CPU, CUDA and HiGHS all return OPTIMAL in all three repetitions for e226. This separate experiment is now generated into the comparison document via `--extended`; the standard nine-case table remains unchanged.
+`results/phase2-e226-extended` uses the identical 0.2 executable, 200,000 NIRYUKTI iterations, 20 s, 4 threads and three measured runs per backend. CPU, CUDA and HiGHS all return OPTIMAL in all three repetitions for e226. This separate experiment is now generated into the comparison document via `--extended`; the standard nine-case table remains unchanged.
 
 - cpu: 3/3 optimal; median end-to-end 2.236620 s.
 - cuda: 3/3 optimal; median end-to-end 6.159601 s.

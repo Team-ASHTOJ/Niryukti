@@ -2,7 +2,7 @@
 
 ## Project identity and problem
 
-**VANTAGE — Vector-Accelerated Numerical Toolkit for Advanced Global Optimization.** A research prototype of an independent sparse mathematical optimization engine for SIH26119, sponsored by MRPL. The project name is not a claim of general nonconvex global optimization support.
+**NIRYUKTI — Independent Sparse Optimization Engine.** A research prototype of an independent sparse mathematical optimization engine for SIH26119, sponsored by MRPL.
 
 Industrial planning uses optimization to choose feasible, economical decisions under resource and quality constraints. The official challenge asks for an inspectable solver core, with GPU acceleration where it provides measurable benefit.
 
@@ -42,6 +42,6 @@ The core does not call HiGHS, SCIP, Gurobi or another optimization solver. HiGHS
 
 - Historical Phase 1 results: [validation.md](validation.md).
 - Work in progress and exploratory Phase 2 observations: [development_log.md](development_log.md).
-- Reproducible Phase 2 results: [phase2_results.md](phase2_results.md), generated from `results/phase2-baseline` and `results/phase2-final`. VANTAGE solves 8/9 selected cases on both CPU and CUDA, up from 6/9; HiGHS solves 9/9. The remaining e226 failure and ADLITTLE GPU regression are retained.
+- Reproducible Phase 2 results: [phase2_results.md](phase2_results.md), generated from `results/phase2-baseline` and `results/phase2-final`. NIRYUKTI solves 8/9 selected cases on both CPU and CUDA, up from 6/9; HiGHS solves 9/9. The remaining e226 failure and ADLITTLE GPU regression are retained.
 
-The separate 200,000-iteration e226 campaign succeeds on both VANTAGE backends in all three repetitions. Present it as a budget-sensitivity example, alongside its standard-budget limit, rather than merging different budgets into a single solve-rate claim.
+The separate 200,000-iteration e226 campaign succeeds on both NIRYUKTI backends in all three repetitions. Present it as a budget-sensitivity example, alongside its standard-budget limit, rather than merging different budgets into a single solve-rate claim.

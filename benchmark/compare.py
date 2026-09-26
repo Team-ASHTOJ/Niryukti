@@ -74,7 +74,7 @@ def main():
         if not reference or summary(reference)[0] != 'OPTIMAL': continue
         objective = statistics.median(r['record']['objective'] for r in reference)
         errors.extend(abs(r['record']['objective']-objective)/max(1,abs(objective)) for r in runs)
-    lines += ['', f'Worst relative objective difference from the matched HiGHS reference among optimal VANTAGE runs: **{max(errors):.6g}**.' if errors else 'Objective agreement unavailable.', '',
+    lines += ['', f'Worst relative objective difference from the matched HiGHS reference among optimal NIRYUKTI runs: **{max(errors):.6g}**.' if errors else 'Objective agreement unavailable.', '',
         'For LP/diagonal QP, optimal status also requires original-space feasibility, stationarity and gap checks at the requested tolerance. For MILP, it requires a feasible integer incumbent and conservative global-bound gap. A rounded incumbent’s continuous KKT value is not an integer optimality test.', '',
         '## Provenance', '']
     for label,folder,meta in [('Before',args.before,before_meta),('After',args.after,after_meta)]:
@@ -90,7 +90,7 @@ def main():
         settings=extra_meta['arguments']
         link=os.path.relpath(args.extended,args.output.parent)
         lines += ['', '## Separate extended-budget experiment', '',
-            f"The same executable was also measured with {settings['iterations']:,} VANTAGE iterations, {settings['threads']} threads, tolerance {settings['tol']}, {settings['time_limit']} s and {settings['runs']} repetitions. This changes the iteration budget, so these results do **not** replace the standard-budget statuses above. [Raw extended campaign]({link}/index.html).", '',
+            f"The same executable was also measured with {settings['iterations']:,} NIRYUKTI iterations, {settings['threads']} threads, tolerance {settings['tol']}, {settings['time_limit']} s and {settings['runs']} repetitions. This changes the iteration budget, so these results do **not** replace the standard-budget statuses above. [Raw extended campaign]({link}/index.html).", '',
             '| Instance | Solver | Status across repetitions | Median end-to-end s | Median accepted iterations |',
             '| --- | --- | --- | ---: | ---: |']
         for (instance,solver),runs in extra.items():

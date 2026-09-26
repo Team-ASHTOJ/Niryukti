@@ -644,7 +644,7 @@ void write_model(const Model &m, const std::string &path) {
 std::string result_json(const Model &m, const Result &r) {
     auto a = r.accuracy;
     json j = {
-        {"solver", "VANTAGE"},
+        {"solver", "NIRYUKTI"},
         {"version", "0.2.0"},
         {"status", r.status},
         {"message", r.message},

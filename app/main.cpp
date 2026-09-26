@@ -10,8 +10,7 @@ int main(int argc, char **argv) {
     try {
         if (argc < 2) {
             std::cout
-                << "VANTAGE 0.2 — Vector-Accelerated Numerical Toolkit for Advanced Global "
-                   "Optimization\nCommands: solve MODEL, inspect MODEL, explain MODEL, "
+                << "NIRYUKTI 0.2 — Independent Sparse Optimization Engine\nCommands: solve MODEL, inspect MODEL, explain MODEL, "
                    "verify MODEL SOLUTION, convert INPUT OUTPUT, devices\nSolve: --device "
                    "cpu|cuda|auto --tol 1e-6 --time-limit 60 --iterations 100000\n       "
                    "--json-out result.json --warm-start result.json --threads 1 --verbose\n  "
@@ -48,7 +47,7 @@ int main(int argc, char **argv) {
                                  48. * m.A.value.size() + 192. * (m.A.rows + m.A.cols + 2)}};
             if (cmd == "explain") {
                 j["method"] = m.is_mip()
-                                  ? "Best-bound branch-and-bound using VANTAGE PDHG relaxations"
+                                  ? "Best-bound branch-and-bound using NIRYUKTI PDHG relaxations"
                               : m.is_qp() ? "PDHG with diagonal quadratic proximal step"
                                           : "Restarted PDHG";
                 j["gpu_suitability_heuristic"] =

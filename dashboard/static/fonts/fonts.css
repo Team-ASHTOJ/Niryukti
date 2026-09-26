@@ -44,3 +44,10 @@
   font-display: swap;
   src: url(/fonts/font-5.ttf) format('truetype');
 }
+@font-face {
+  font-family: 'Sora';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url(/fonts/Sora-Variable.ttf) format('truetype');
+}

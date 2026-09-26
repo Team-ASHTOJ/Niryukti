@@ -2,7 +2,7 @@
 
 ## Continuous formulation
 
-VANTAGE minimizes
+NIRYUKTI minimizes
 
 `f(x) = cᵀx + 0.5 Σ qⱼ xⱼ² + c₀`, with `l ≤ x ≤ u` and `L ≤ Ax ≤ U`.
 
@@ -77,7 +77,7 @@ The diagonal QP bound uses separable quadratic minimization with a roundoff allo
 
 ## MILP
 
-The tree relaxes integrality through VANTAGE's own continuous solver. Integer domains are rounded inward initially. At each node, up to five propagation passes derive implied integer bounds from prefix/suffix row-activity intervals. Every arithmetic operation expands its long-double interval outward; tightening is restricted to exactly representable integer magnitudes. Continuous bounds and row intervals are retained, avoiding a new dual postsolve mapping. Most-fractional branching partitions a variable at floor/ceiling; nodes are selected by best bound. Candidates are rounded and independently checked, and occasional round-and-repair solves fix integers while optimizing continuous variables. Children inherit the primal/dual warm start.
+The tree relaxes integrality through NIRYUKTI's own continuous solver. Integer domains are rounded inward initially. At each node, up to five propagation passes derive implied integer bounds from prefix/suffix row-activity intervals. Every arithmetic operation expands its long-double interval outward; tightening is restricted to exactly representable integer magnitudes. Continuous bounds and row intervals are retained, avoiding a new dual postsolve mapping. Most-fractional branching partitions a variable at floor/ceiling; nodes are selected by best bound. Candidates are rounded and independently checked, and occasional round-and-repair solves fix integers while optimizing continuous variables. Children inherit the primal/dual warm start.
 
 An LP primal objective is not a pruning bound. Nodes close only through presolve infeasibility or a valid Lagrangian/inherited bound relative to the incumbent and requested MIP gap. Approximately integral but unresolved relaxations remain unresolved leaves. Global bound reporting includes the queue, unresolved leaves and bounds of fathomed leaves. A standalone solution file verifies an incumbent, not a replayable tree proof.
 
@@ -92,7 +92,7 @@ For a candidate row multiplier y, independently evaluate the conservative box La
 The implementation was written independently from these mathematical ideas; no solver iteration code was transplanted.
 
 - Chambolle and Pock, [A First-Order Primal-Dual Algorithm for Convex Problems with Applications to Imaging](https://doi.org/10.1007/s10851-010-0251-1).
-- Applegate et al., [Practical Large-Scale Linear Programming using Primal-Dual Hybrid Gradient](https://arxiv.org/abs/2106.04756). VANTAGE implements a smaller, distinct feature set; the paper's performance claims do not describe this prototype.
+- Applegate et al., [Practical Large-Scale Linear Programming using Primal-Dual Hybrid Gradient](https://arxiv.org/abs/2106.04756). NIRYUKTI implements a smaller, distinct feature set; the paper's performance claims do not describe this prototype.
 - Applegate et al., [Infeasibility detection with primal-dual hybrid gradient for large-scale linear programming](https://arxiv.org/abs/2102.04592), a future certificate-development reference.
 - [MOSEK's MPS format documentation](https://docs.mosek.com/11.1/pythonapi/mps-format.html), used for format semantics, not optimization code.
 

@@ -1,4 +1,4 @@
-# VANTAGE dashboard
+# NIRYUKTI dashboard
 
 Run from the repository root:
 
@@ -15,7 +15,7 @@ Benchmark data uses the completed `results/phase2-final` campaign when available
 
 Python and JavaScript coordinate execution and present the independent C++ solver’s results. The Phase 2 solver changes and benchmark evidence are described in [the documentation index](../docs/README.md). One local solve runs at a time; uploads are limited to 5 MB and execution requests to 120 seconds, plus a cleanup allowance. The server binds to loopback and is intended for your local workspace, not an internet deployment. Mutation endpoints require a session token; arbitrary filesystem paths and command strings cannot be supplied by the client.
 
-Fonts: Instrument Sans and IBM Plex Mono, locally bundled with their OFL notices in `static/fonts/`.
+Fonts: Sora (display and figures), Instrument Sans (interface) and IBM Plex Mono (numeric readouts), locally bundled with their OFL notices in `static/fonts/`.
 
 Browser validation (development-only npm dependency):
 
@@ -28,17 +28,17 @@ The browser check uses `/opt/google/chrome/chrome` by default; override `CHROME_
 
 ## Instrumentation interface
 
-The dashboard uses a shared obsidian/cyan design system, locally bundled fonts, CSS perspective geometry, and SVG plots. No WebGL renderer or new runtime dependencies are required. The **Effects** button persists a local preference that disables decorative motion and the computational background. System reduced-motion preferences also disable animations.
+The dashboard follows the NIRYUKTI brand: charcoal ink and champagne gold. Light theme is the default brand sheet; the dark theme is graphite with a brighter champagne. The theme follows the system preference until the sun/moon button saves a choice. Colours are tokens in `style.css`, so charts, effects and the logo recolour together. The interface uses locally bundled fonts, CSS perspective geometry and SVG plots. No WebGL renderer or new runtime dependencies are required. The **Effects** button persists a local preference that disables decorative motion and the computational background. System reduced-motion preferences also disable animations.
 
 Navigation includes run history, import, verification, hardware, diagnostics and in-app documentation alongside the original overview, solver, library and benchmark views. The solver cockpit displays real result fields and a logarithmic envelope of logged primal, dual and gap values. MILP relaxation logs are not plotted as global convergence. Refinery and branch-tree diagrams are explicitly illustrative; dispatch bars use the returned solution vector. GPU utilization, memory, search topology and separate independent recomputation are marked unavailable or omitted where the API does not expose them.
 
 Benchmark plots use actual recorded medians. Cactus and scatter plots include optimal results only; performance profiles retain unsolved cases in their denominator. Empty datasets remain empty rather than receiving example values. Expanded browser validation covers all routes at 390, 1440, 1920 and 2560 pixel widths, effect preferences, reduced motion, and real LP/QP/MILP runs.
 
-Brand artwork is supplied in `static/logo.png`; `brand.svg` and `favicon.svg` embed the unchanged image in cropped SVG viewports for navbar and icon use. Replace/regenerate these wrappers together when changing the source logo.
+The NIRYUKTI mark and wordmark are inline SVG symbols in `index.html` (`#nk-mark`, `#nk-word`), redrawn as vectors from the supplied logo so they recolour per theme. The mark is an N on a coordinate frame crossed by a gold optimization path; the overview hero draws that path once on load. `favicon.svg` adapts to the browser's colour scheme, and `brand.svg` is the full lockup with tagline for use outside the app.
 
 The overview’s asymmetric grid, diamond textures, hatched comparison bars and one-time tile entrances adapt the supplied [Zepa UI any-grid](https://zepa.design/components/any-grid) reference. Attribution is retained in source. Layout and action highlights stay stable, measurements never scramble, and entrance effects use an intersection observer without a continuous rendering loop. These shared treatments also apply to the model library and analysis panels.
 
-The sticky top navigation adapts the supplied [Zepa UI cohort-navbar](https://zepa.design/components/cohort-navbar) reference, with VANTAGE routes, a Workspace mega menu, hover/focus previews, and a collapsible tablet/mobile menu. Dropdowns support click, keyboard entry, Escape, and outside-click dismissal. No React or external image dependencies were added.
+The sticky top navigation adapts the supplied [Zepa UI cohort-navbar](https://zepa.design/components/cohort-navbar) reference, with NIRYUKTI routes, a Workspace mega menu, hover/focus previews, and a collapsible tablet/mobile menu. Dropdowns support click, keyboard entry, Escape, and outside-click dismissal. No React or external image dependencies were added.
 
 The overview computation stage includes a decorative cursor-responsive wave grid inspired by Zepa UI wave-hero (@franky-adl). It uses 256 Canvas 2D blocks at up to 24 updates per second with a fixed 640×360 backing surface and at most six pointer ripples. It stops offscreen, in hidden tabs, during local solver runs, with reduced motion, or with Effects off. The effect adds no WebGL, Three.js, GSAP, or network dependencies.
 

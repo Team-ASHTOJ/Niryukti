@@ -41,9 +41,9 @@ Measured executable SHA-256: `fce0862a20d6d16aab1438d9f2961c4cb4821dbe57e72a98d3
 | scalability-final | refinery_large.mps | cuda | 3/3 | 7.707421 | OPTIMAL |
 | scalability-final | refinery_large.mps | highs | 3/3 | 0.794403 | OPTIMAL |
 
-Main demo: 36 measured runs, all optimal. The broader suite retains VANTAGE iteration limits on `israel` and `e226`; scheduling retains unresolved bounds / time limits. HiGHS solves these cases.
+Main demo: 36 measured runs, all optimal. The broader suite retains NIRYUKTI iteration limits on `israel` and `e226`; scheduling retains unresolved bounds / time limits. HiGHS solves these cases.
 
-The large synthetic instance has 46,720 variables and 186,880 nonzeros. It is largely separable by period. Three measured runs, one discarded CUDA warmup, and four CPU threads for both VANTAGE and HiGHS. Read residuals with objectives: approximate feasible objectives can fall slightly below the exact optimum.
+The large synthetic instance has 46,720 variables and 186,880 nonzeros. It is largely separable by period. Three measured runs, one discarded CUDA warmup, and four CPU threads for both NIRYUKTI and HiGHS. Read residuals with objectives: approximate feasible objectives can fall slightly below the exact optimum.
 
 On this synthetic instance the median own-CPU/GPU end-to-end ratio was 1.45x. HiGHS remained faster (0.794s versus 7.707s CUDA). This is not a claim about general industrial performance.
 

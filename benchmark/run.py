@@ -85,7 +85,7 @@ def main():
                 (raw/f'{name}.stdout').write_text(stdout);(raw/f'{name}.stderr').write_text(stderr)
                 accuracy=data.get('accuracy',{})
                 if solver=='highs' and data.get('primal') and inspect.get('fingerprint'):
-                    # Verify baseline primal using VANTAGE's independent original-space checker.
+                    # Verify baseline primal using NIRYUKTI's independent original-space checker.
                     sense=1
                     if path.suffix.lower()=='.json':sense=1 if json.loads(path.read_text()).get('sense','min')=='min' else -1
                     else:

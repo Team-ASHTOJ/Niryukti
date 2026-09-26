@@ -4,10 +4,16 @@ const browser=await chromium.launch({headless:true,executablePath:process.env.CH
 const page=await browser.newPage({viewport:{width:1440,height:1100},deviceScaleFactor:1});
 const errors=[];page.on('pageerror',e=>errors.push(e.message));
 await page.goto((process.env.DASHBOARD_URL||'http://127.0.0.1:8080'));await page.waitForSelector('.stats-grid').catch(async error=>{console.error(errors,await page.locator('main').innerText());throw error;});await page.evaluate(()=>document.fonts.ready);
-await page.locator('.brand img').evaluate(img=>img.decode());
-if(await page.locator('.brand img').getAttribute('src')!=='/brand.svg')throw Error('Custom logo is not installed');
-const favicon=await page.request.get(new URL('/favicon.svg',page.url()).href);if(!favicon.ok()||!(await favicon.text()).includes('data:image/png;base64,'))throw Error('Custom favicon unavailable');
-await page.screenshot({animations:'disabled',path:'/tmp/vantage-overview.png',fullPage:true});
+if(await page.locator('.brand use[href="#nk-mark"]').count()!==1||await page.locator('.brand use[href="#nk-word"]').count()!==1)throw Error('NIRYUKTI brand mark is not installed');
+const favicon=await page.request.get(new URL('/favicon.svg',page.url()).href);if(!favicon.ok()||!(await favicon.text()).includes('prefers-color-scheme'))throw Error('Theme-aware favicon unavailable');
+// Theme toggle flips light/dark, persists, and changes the surface colour.
+const bgOf=()=>page.evaluate(()=>getComputedStyle(document.body).backgroundColor);
+const theme0=await page.evaluate(()=>document.documentElement.dataset.theme),bg0=await bgOf();
+await page.locator('#theme-toggle').click();
+if(await page.evaluate(()=>document.documentElement.dataset.theme)===theme0||await bgOf()===bg0)throw Error('Theme toggle failed');
+if(await page.evaluate(()=>localStorage.getItem('niryukti-theme'))===theme0)throw Error('Theme choice not persisted');
+await page.locator('#theme-toggle').click();
+await page.screenshot({animations:'disabled',path:'/tmp/niryukti-overview.png',fullPage:true});
 if(await page.locator('#pixel-snow').evaluate(c=>c.hidden||c.width>480||c.height>600))throw Error('PixelSnow shader unavailable or exceeded render budget');
 const wave=page.locator('.wave-grid');
 await wave.scrollIntoViewIfNeeded();await page.waitForTimeout(100);
@@ -29,10 +35,10 @@ await page.locator('#case-search').fill('israel');await page.waitForTimeout(100)
 await page.locator('tr[data-case="israel"]').click();await page.waitForSelector('#drawer:not([hidden])');if(!await page.locator('#drawer').innerText().then(t=>t.includes('Original-space primal residual')))throw Error('Missing numerical evidence');await page.keyboard.press('Escape');
 await page.locator('nav a[data-nav="solve"]').click();await page.waitForSelector('#solve-form');
 await page.locator('#model-select').selectOption('dispatch');await page.locator('input[name=iterations]').fill('1000');const submitted=page.waitForResponse(r=>r.url().endsWith('/api/runs')&&r.request().method()==='POST');await page.locator('#run-button').click();const job=await (await submitted).json();if(job.options.iterations!==1000)throw Error('Iteration budget was not accepted');
-await page.waitForSelector('#solve-output .pill.green',{timeout:30000});await page.screenshot({animations:'disabled',path:'/tmp/vantage-solve.png',fullPage:true});
+await page.waitForSelector('#solve-output .pill.green',{timeout:30000});await page.screenshot({animations:'disabled',path:'/tmp/niryukti-solve.png',fullPage:true});
 await page.locator('#platform-toggle').focus();await page.keyboard.press('ArrowDown');
 if(!await page.locator('.mega-links a').first().evaluate(e=>e===document.activeElement))throw Error('Mega menu keyboard entry failed');
-await page.screenshot({animations:'disabled',path:'/tmp/vantage-navbar.png'});
+await page.screenshot({animations:'disabled',path:'/tmp/niryukti-navbar.png'});
 await page.keyboard.press('Escape');
 if(!await page.locator('#platform-toggle').evaluate(e=>e===document.activeElement))throw Error('Mega menu focus restore failed');
 if(!await page.locator('#platform-panel').evaluate(e=>e.hidden))throw Error('Mega menu Escape failed');
@@ -41,9 +47,9 @@ await page.locator('#model-file').setInputFiles({name:'test.lp',mimeType:'text/p
 await page.waitForFunction(()=>document.querySelector('#model-select')?.selectedOptions[0]?.textContent.includes('test.lp'));
 await page.locator('#run-button').click();await page.waitForSelector('#solve-output .pill.green',{timeout:30000});
 await page.locator('#platform-toggle').click();await page.locator('nav a[data-nav="models"]').click();await page.waitForSelector('.model-grid');
-await page.setViewportSize({width:390,height:844});await page.goto((process.env.DASHBOARD_URL||'http://127.0.0.1:8080')+'/#overview');await page.waitForSelector('.stats-grid');await page.waitForTimeout(350);await page.screenshot({animations:'disabled',path:'/tmp/vantage-mobile.png',fullPage:true});
+await page.setViewportSize({width:390,height:844});await page.goto((process.env.DASHBOARD_URL||'http://127.0.0.1:8080')+'/#overview');await page.waitForSelector('.stats-grid');await page.waitForTimeout(350);await page.screenshot({animations:'disabled',path:'/tmp/niryukti-mobile.png',fullPage:true});
 const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth);if(overflow)throw Error('Mobile horizontal overflow');
-await page.locator('#menu-button').click();await page.locator('#platform-toggle').click();await page.screenshot({animations:'disabled',path:'/tmp/vantage-navbar-mobile.png'});await page.locator('nav a[data-nav="verification"]').click();if(await page.locator('#menu-button').getAttribute('aria-expanded')!=='false')throw Error('Mobile menu did not close on navigation');await page.locator('#menu-button').click();await page.locator('nav a[data-nav="solve"]').click();await page.waitForSelector('#solve-form');
+await page.locator('#menu-button').click();await page.locator('#platform-toggle').click();await page.screenshot({animations:'disabled',path:'/tmp/niryukti-navbar-mobile.png'});await page.locator('nav a[data-nav="verification"]').click();if(await page.locator('#menu-button').getAttribute('aria-expanded')!=='false')throw Error('Mobile menu did not close on navigation');await page.locator('#menu-button').click();await page.locator('nav a[data-nav="solve"]').click();await page.waitForSelector('#solve-form');
 // Audit every route at desktop and mobile sizes, including newly added consoles.
 for(const width of [1440,1920,2560,390]){
  await page.setViewportSize({width,height:900});
@@ -51,7 +57,7 @@ for(const width of [1440,1920,2560,390]){
   await page.goto((process.env.DASHBOARD_URL||'http://127.0.0.1:8080')+'/#'+route);
   await page.waitForSelector('main h1');
   if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw Error(`Overflow: ${route} at ${width}`);
-  if(width===1440)await page.screenshot({animations:'disabled',path:`/tmp/vantage-${route}-audit.png`,fullPage:true});
+  if(width===1440)await page.screenshot({animations:'disabled',path:`/tmp/niryukti-${route}-audit.png`,fullPage:true});
  }
 }
 await page.locator('#effects-toggle').click();
@@ -70,7 +76,7 @@ for(const model of ['refinery','supply_chain']){
  await page.locator('#run-button').click();
  await page.waitForSelector('a[href$="/download"]',{timeout:30000});
  await page.waitForSelector(model==='refinery'?'.refinery-schematic':'.tree-schematic');
- await page.screenshot({animations:'disabled',path:`/tmp/vantage-${model}-audit.png`,fullPage:true});
+ await page.screenshot({animations:'disabled',path:`/tmp/niryukti-${model}-audit.png`,fullPage:true});
 }
 if(errors.length)throw Error(errors.join('\n'));
 console.log('PASS: desktop/mobile, navigation, search, details, live solve, model import, result download; no browser errors.');await browser.close();

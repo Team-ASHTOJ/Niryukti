@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""External comparison process only. Never imported by the VANTAGE solver or API."""
+"""External comparison process only. Never imported by the NIRYUKTI solver or API."""
 import argparse
 import json
 import time

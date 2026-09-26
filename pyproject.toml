@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "vantage-opt"
 version = "0.2.0"
-description = "Python access to the independent VANTAGE sparse optimization engine"
+description = "Python access to the independent NIRYUKTI sparse optimization engine"
 requires-python = ">=3.10"
 [tool.setuptools.packages.find]
 where = ["python"]

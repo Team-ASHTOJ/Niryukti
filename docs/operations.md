@@ -1,4 +1,4 @@
-# Running, validating and presenting VANTAGE
+# Running, validating and presenting NIRYUKTI
 
 ## Start from a clean build
 

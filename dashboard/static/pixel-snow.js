@@ -140,7 +140,7 @@ void main() {
           float flakeSizeRatio = uFlakeSize / flakeSize;
           float intensity = exp2(-(t + toIntersection) * invDepthFade) *
                            min(1.0, flakeSizeRatio * flakeSizeRatio) * uBrightness;
-          snowColor = vec4(uColor * pow(vec3(intensity), vec3(uGamma)), 1.0);
+          snowColor = vec4(uColor, pow(intensity, uGamma));
           return;
         }
       }
@@ -176,7 +176,9 @@ gl.useProgram(program);
 const uniform=name=>gl.getUniformLocation(program,name);
 const settings={uFlakeSize:.01,uMinFlakeSize:1.25,uPixelResolution:300,uSpeed:1.1,uDepthFade:5,uFarPlane:10,uBrightness:.3,uGamma:.4545,uDensity:.25,uVariant:0,uDirection:80*Math.PI/180};
 Object.entries(settings).forEach(([key,value])=>gl.uniform1f(uniform(key),value));
-gl.uniform3f(uniform('uColor'),.82,.93,1);
+// Champagne flakes on graphite; deeper bronze on paper so they stay visible.
+function tint(){const dark=document.documentElement.dataset.theme==='dark';gl.uniform3f(uniform('uColor'),...(dark?[.86,.74,.54]:[.6,.46,.26]));}
+tint();
 const timeUniform=uniform('uTime'),resolution=uniform('uResolution');
 let timer=0,elapsed=0,lost=false,resizeTimer=0;
 function allowed(){return effectsEnabled&&!reduced.matches&&!document.hidden&&!lost&&(!state.job||state.job.state==='finished');}
@@ -195,6 +197,7 @@ canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();lost=t
 // Context loss leaves the ordinary gradient/grid background available.
 document.addEventListener('visibilitychange',sync);
 document.addEventListener('solver-state',sync);
+document.addEventListener('theme-change',()=>{if(!lost){tint();draw();}});
 document.querySelector('#effects-toggle').addEventListener('click',sync);
 reduced.addEventListener('change',sync);
 window.addEventListener('resize',queueResize);

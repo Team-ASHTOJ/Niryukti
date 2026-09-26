@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local dashboard and process-isolated access to the VANTAGE CLI. Standard library only."""
+"""Local dashboard and process-isolated access to the NIRYUKTI CLI. Standard library only."""
 import argparse
 import csv
 import io
@@ -264,7 +264,7 @@ def main():
             if isinstance(job,dict) and job.get('state')=='finished' and job.get('id'): JOBS[job['id']]=job
         except (ValueError,OSError): pass
     server=ThreadingHTTPServer(('127.0.0.1',args.port),Handler)
-    print(f'VANTAGE dashboard → http://127.0.0.1:{args.port}',flush=True)
+    print(f'NIRYUKTI dashboard → http://127.0.0.1:{args.port}',flush=True)
     try: server.serve_forever()
     except KeyboardInterrupt: pass
     finally: server.server_close()

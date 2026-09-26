@@ -36,7 +36,7 @@ def solve(path, *, device='auto', tol=1e-6, time_limit=60, threads=1, warm_start
             command+=['--warm-start',str(warm)]
             if allow_model_change:command+=['--allow-model-change']
         p=subprocess.run(command,capture_output=True,text=True)
-        if p.returncode not in (0,2):raise RuntimeError(p.stderr.strip() or 'VANTAGE process failed')
+        if p.returncode not in (0,2):raise RuntimeError(p.stderr.strip() or 'NIRYUKTI process failed')
         return json.loads(p.stdout)
 
 

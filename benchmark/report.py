@@ -19,9 +19,9 @@ for i,r in enumerate(summary):
     val=r['median_end_to_end_seconds'];y=30+i*30
     width=0 if val is None else 470*val/maximum
     bars+=f'<text x="8" y="{y+14}">{esc(r["instance"]+" / "+r["solver"])}</text><rect x="275" y="{y}" width="{width}" height="20" fill="{("#2dd4bf" if r["optimal_runs"]==r["total_runs"] else "#fbbf24")}"/><text x="{285+width}" y="{y+14}">{"unavailable" if val is None else f"{val:.5f}s"}</text>'
-page='''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VANTAGE benchmark report</title><style>
+page='''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NIRYUKTI benchmark report</title><style>
 body{background:#0c1322;color:#e2e8f0;font:15px system-ui;margin:32px}h1{letter-spacing:.12em}p{max-width:1000px;line-height:1.6}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:10px;text-align:left;border-bottom:1px solid #334155}th{background:#172033;position:sticky;top:0}.ok{color:#2dd4bf}.limit{color:#fbbf24}svg{background:#172033;border-radius:12px;width:100%;max-width:1100px}svg text{fill:#e2e8f0;font:12px system-ui}a{color:#67e8f9}.scroll{overflow:auto}</style>
-<h1>VANTAGE</h1><p>Independent sparse optimization · reproducible prototype measurements</p>
+<h1>NIRYUKTI</h1><p>Independent sparse optimization · reproducible prototype measurements</p>
 <p>Every selected measured run appears below, including failures and limits. CUDA receives one discarded warmup process per instance. Timings include parsing and device setup/transfers; process wall time additionally includes process startup. Small instances can favor CPU solvers. Amber bars include runs that did not reach optimal status.</p>
 <p>LP/QP KKT values are independently recomputed in original units. For MILP, continuous KKT values do not certify tree optimality: inspect the raw incumbent, global bound, and MIP gap. Baseline tolerance conventions differ; objective and feasibility agreement must be read alongside timing.</p>
 <p><a href="profile.html">Performance profiles</a> · <a href="runs.csv">All measured runs (CSV)</a> · <a href="summary.json">Median summaries</a> · <a href="manifest.json">Machine and configuration</a></p>

@@ -37,7 +37,7 @@ These measurements were taken on a shared development laptop, not an isolated pe
 | cuda | 6/9 | 8/9 |
 | highs | Not measured | 9/9 |
 
-Worst relative objective difference from the matched HiGHS reference among optimal VANTAGE runs: **1.26488e-07**.
+Worst relative objective difference from the matched HiGHS reference among optimal NIRYUKTI runs: **1.26488e-07**.
 
 For LP/diagonal QP, optimal status also requires original-space feasibility, stationarity and gap checks at the requested tolerance. For MILP, it requires a feasible integer incumbent and conservative global-bound gap. A rounded incumbent’s continuous KKT value is not an integer optimality test.
 
@@ -48,7 +48,7 @@ For LP/diagonal QP, optimal status also requires original-space feasibility, sta
 
 ## Separate extended-budget experiment
 
-The same executable was also measured with 200,000 VANTAGE iterations, 4 threads, tolerance 1e-06, 20.0 s and 3 repetitions. This changes the iteration budget, so these results do **not** replace the standard-budget statuses above. [Raw extended campaign](../results/phase2-e226-extended/index.html).
+The same executable was also measured with 200,000 NIRYUKTI iterations, 4 threads, tolerance 1e-06, 20.0 s and 3 repetitions. This changes the iteration budget, so these results do **not** replace the standard-budget statuses above. [Raw extended campaign](../results/phase2-e226-extended/index.html).
 
 | Instance | Solver | Status across repetitions | Median end-to-end s | Median accepted iterations |
 | --- | --- | --- | ---: | ---: |
