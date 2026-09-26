@@ -46,5 +46,9 @@ std::unique_ptr<IterationBackend> cpu_backend(const Model &, const std::vector<d
                                               bool halpern = false, double reflection = 0,
                                               bool fixed_point_restarts = false);
 std::unique_ptr<IterationBackend> cuda_backend(const Model &, const std::vector<double> &,
-                                               const std::vector<double> &, bool adaptive = false);
+                                               const std::vector<double> &, bool adaptive = false,
+                                               bool halpern = false, double reflection = 0,
+                                               bool residual_restarts = false, bool graphs = false,
+                                               const std::string &indices = "auto",
+                                               const std::string &precision = "fp64");
 } // namespace vantage

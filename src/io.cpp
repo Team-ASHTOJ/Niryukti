@@ -74,6 +74,8 @@ void canonicalize(Model &m) {
         v *= m.sense;
     for (auto &v : m.q)
         v *= m.sense;
+    for (auto &v : m.Q.value)
+        v *= m.sense;
     m.offset *= m.sense;
     m.validate();
 }
@@ -106,8 +108,17 @@ Model read_json(std::istream &in) {
     m.c = obj.at("linear").get<std::vector<double>>();
     if (obj.contains("quadratic_diagonal"))
         m.q = obj.at("quadratic_diagonal").get<std::vector<double>>();
+    if (obj.contains("quadratic_sparse")) {
+        std::vector<Entry> entries;
+        for (const auto &v : obj.at("quadratic_sparse")) {
+            if (v.size() != 3)
+                throw std::runtime_error("quadratic_sparse entries must be [row,column,value]");
+            entries.push_back({v[0].get<int64_t>(), v[1].get<int64_t>(), v[2].get<double>()});
+        }
+        m.Q = Sparse::build(m.c.size(), m.c.size(), std::move(entries));
+    }
     if (obj.contains("quadratic"))
-        throw std::runtime_error("UNSUPPORTED: use quadratic_diagonal; general Q is Phase 2");
+        throw std::runtime_error("Use explicit symmetric quadratic_sparse triples");
     m.offset = obj.value("offset", 0.);
     std::vector<Entry> e;
     for (const auto &row : j.at("constraints")) {
@@ -129,6 +140,7 @@ Model read_mps(std::istream &in) {
     Model m;
     std::string section, line, obj, rhs_set, range_set, bound_set, last_col;
     std::map<std::string, int64_t> vars, rows;
+    std::vector<Entry> quadratic_entries;
     std::vector<char> rowtype;
     std::vector<double> rhs, ranges;
     std::vector<bool> has_range;
@@ -305,16 +317,21 @@ Model read_mps(std::istream &in) {
             } else if (section == "QMATRIX" || section == "QUADOBJ") {
                 if (t.size() != 3 || !vars.count(t[0]) || !vars.count(t[1]))
                     throw std::runtime_error("Invalid quadratic entry");
-                if (t[0] != t[1])
-                    throw std::runtime_error(
-                        "UNSUPPORTED off-diagonal Q; Phase 1 supports separable convex QP");
-                m.q[vars.at(t[0])] += number(t[2]);
+                auto i = vars.at(t[0]), j = vars.at(t[1]);
+                if (i == j)
+                    m.q[i] += number(t[2]);
+                else {
+                    quadratic_entries.push_back({i, j, number(t[2])});
+                    if (section == "QUADOBJ")
+                        quadratic_entries.push_back({j, i, number(t[2])});
+                }
             } else
                 throw std::runtime_error("Unexpected MPS data");
         } catch (const std::exception &ex) {
             throw std::runtime_error("MPS line " + std::to_string(lineno) + ": " + ex.what());
         }
     }
+    m.Q = Sparse::build(m.c.size(), m.c.size(), std::move(quadratic_entries));
     if (!ended || integer || obj.empty())
         throw std::runtime_error("Incomplete MPS / unclosed integer marker");
     // Historical INTORG defaults to [0,1] when no BOUNDS record exists.
@@ -538,6 +555,13 @@ json json_model(const Model &m) {
     for (auto &v : q)
         v *= m.sense;
     j["objective"] = {{"linear", c}, {"quadratic_diagonal", q}, {"offset", m.offset * m.sense}};
+    if (!m.Q.value.empty()) {
+        j["objective"]["quadratic_sparse"] = json::array();
+        for (int64_t i = 0; i < m.Q.rows; ++i)
+            for (auto k = m.Q.ptr[i]; k < m.Q.ptr[i + 1]; ++k)
+                j["objective"]["quadratic_sparse"].push_back(
+                    {json(i), json(m.Q.index[k]), json(m.Q.value[k] * m.sense)});
+    }
     for (size_t k = 0; k < c.size(); k++)
         j["variables"].push_back({{"name", m.names[k]},
                                   {"lb", m.lb[k]},
@@ -639,6 +663,12 @@ void write_model(const Model &m, const std::string &path) {
             if (m.q[j] != 0)
                 f << " " << m.names[j] << " " << m.names[j] << " " << m.q[j] * m.sense << '\n';
     }
+    if (!m.Q.value.empty())
+        for (int64_t i = 0; i < m.Q.rows; ++i)
+            for (auto k = m.Q.ptr[i]; k < m.Q.ptr[i + 1]; ++k)
+                if (m.Q.index[k] >= i)
+                    f << " " << m.names[i] << " " << m.names[m.Q.index[k]] << " "
+                      << m.Q.value[k] * m.sense << '\n';
     f << "ENDATA\n";
 }
 std::string result_json(const Model &m, const Result &r) {
@@ -688,6 +718,9 @@ std::string result_json(const Model &m, const Result &r) {
         {"presolve", {{"removed_rows", r.removed_rows}, {"removed_columns", r.removed_columns}}},
         {"primal", r.x},
         {"dual", r.y}};
+    j["gpu_execution"] = {{"index_bits", r.gpu_index_bits},
+                          {"cuda_graphs", r.graph_execution},
+                          {"matrix_precision", r.matrix_precision}};
     if (!r.infeasibility_ray.empty())
         j["certificate"] = {{"kind", "BOX_ROW_FARKAS"},
                             {"dual_ray", r.infeasibility_ray},

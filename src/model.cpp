@@ -103,12 +103,85 @@ void Model::validate() const {
     for (size_t k = 0; k < A.value.size(); k++)
         if (A.index[k] < 0 || A.index[k] >= int64_t(n) || !std::isfinite(A.value[k]))
             throw std::runtime_error("Invalid matrix coefficient/index");
+    if (!Q.value.empty()) {
+        if (Q.rows != int64_t(n) || Q.cols != int64_t(n) || Q.ptr.size() != n + 1 ||
+            Q.ptr.front() != 0 || Q.ptr.back() != int64_t(Q.value.size()) ||
+            Q.index.size() != Q.value.size())
+            throw std::runtime_error("Invalid quadratic CSR shape");
+        for (size_t i = 0; i < n; ++i)
+            if (Q.ptr[i] < 0 || Q.ptr[i] > Q.ptr[i + 1] || Q.ptr[i + 1] > int64_t(Q.value.size()))
+                throw std::runtime_error("Invalid quadratic CSR offsets");
+        for (size_t k = 0; k < Q.value.size(); ++k)
+            if (Q.index[k] < 0 || Q.index[k] >= int64_t(n) || !std::isfinite(Q.value[k]))
+                throw std::runtime_error("Invalid quadratic coefficient/index");
+        auto qt = Q.transpose();
+        if (qt.ptr != Q.ptr || qt.index != Q.index || qt.value != Q.value)
+            throw std::runtime_error("Quadratic matrix must be exactly symmetric");
+        bool dominant = true;
+        for (size_t i = 0; i < n; ++i) {
+            long double diagonal = q[i], off = 0;
+            if (Q.ptr[i] > Q.ptr[i + 1])
+                throw std::runtime_error("Invalid quadratic CSR offsets");
+            int64_t previous = -1;
+            for (auto k = Q.ptr[i]; k < Q.ptr[i + 1]; ++k) {
+                auto j = Q.index[k];
+                auto v = Q.value[k];
+                if (j <= previous || j >= int64_t(n) || !std::isfinite(v))
+                    throw std::runtime_error("Invalid quadratic coefficient/index");
+                previous = j;
+                if (j == int64_t(i))
+                    diagonal += v;
+                else
+                    off += std::abs(v);
+            }
+            dominant &= diagonal >= off;
+        }
+        if (!dominant) {
+            if (n > 256)
+                throw std::runtime_error(
+                    "UNSUPPORTED: large sparse Q requires a diagonal-dominance PSD certificate");
+            // Dense storage is confined to small-model convexity validation, never iterations.
+            std::vector<long double> h(n * n);
+            for (size_t i = 0; i < n; ++i) {
+                h[i * n + i] = q[i];
+                for (auto k = Q.ptr[i]; k < Q.ptr[i + 1]; ++k)
+                    h[i * n + Q.index[k]] += Q.value[k];
+            }
+            for (size_t k = 0; k < n; ++k) {
+                auto pivot = h[k * n + k];
+                if (pivot < 0 || !std::isfinite(pivot))
+                    throw std::runtime_error("UNSUPPORTED: quadratic objective is not PSD");
+                if (pivot == 0) {
+                    for (size_t i = k + 1; i < n; ++i)
+                        if (h[i * n + k] != 0)
+                            throw std::runtime_error("UNSUPPORTED: quadratic objective is not PSD");
+                    continue;
+                }
+                for (size_t i = k + 1; i < n; ++i)
+                    for (size_t j = i; j < n; ++j) {
+                        h[j * n + i] -= h[i * n + k] * h[j * n + k] / pivot;
+                        h[i * n + j] = h[j * n + i];
+                    }
+            }
+        }
+    }
+}
+double Model::quadratic_norm_bound() const {
+    long double largest = 0;
+    for (size_t i = 0; i < c.size(); ++i) {
+        long double sum = std::abs(q[i]);
+        if (!Q.value.empty())
+            for (auto k = Q.ptr[i]; k < Q.ptr[i + 1]; ++k)
+                sum += std::abs(Q.value[k]);
+        largest = std::max(largest, sum);
+    }
+    return std::nextafter(double(largest), inf);
 }
 bool Model::is_mip() const {
     return std::any_of(types.begin(), types.end(), [](auto t) { return t != VarType::Continuous; });
 }
 bool Model::is_qp() const {
-    return std::any_of(q.begin(), q.end(), [](double v) { return v != 0; });
+    return !Q.value.empty() || std::any_of(q.begin(), q.end(), [](double v) { return v != 0; });
 }
 std::string Model::fingerprint() const {
     uint64_t h = 14695981039346656037ULL;
@@ -130,6 +203,14 @@ std::string Model::fingerprint() const {
         bytes(a);
     for (auto a : A.index)
         bytes(a);
+    if (!Q.value.empty()) {
+        for (auto a : Q.ptr)
+            bytes(a);
+        for (auto a : Q.index)
+            bytes(a);
+        for (auto a : Q.value)
+            bytes(a);
+    }
     for (auto a : types) {
         int t = int(a);
         bytes(t);

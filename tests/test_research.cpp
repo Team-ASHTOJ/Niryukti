@@ -113,6 +113,107 @@ void halpern() {
         require(solve(lp, o).status == "ITERATION_LIMIT", "Halpern limits preserved");
     }
 }
+void sparse_quadratic() {
+    auto m = model(2, 1, {{0, 0, 1}, {0, 1, 1}});
+    m.lb = {0, 0};
+    m.ub = {4, 4};
+    m.rl = m.ru = {3};
+    m.Q = Sparse::build(2, 2, {{0, 0, 2}, {0, 1, 1}, {1, 0, 1}, {1, 1, 2}});
+    m.c = {-4, -5}; // Optimum (1,2), objective -7.
+    m.validate();
+    for (auto device : {"cpu", "cuda"}) {
+        if (std::string(device) == "cuda" && !cuda_available())
+            continue;
+        Options o;
+        o.device = device;
+        o.iteration_limit = 100000;
+        auto r = solve(m, o);
+        require(r.status == "OPTIMAL", "sparse QP convergence");
+        near(r.x[0], 1, 1e-5);
+        near(r.x[1], 2, 1e-5);
+        near(r.accuracy.objective, -7, 1e-5);
+        require(verify(m, r.x, r.y).kkt <= o.tol, "sparse QP original KKT");
+        if (std::string(device) == "cuda") {
+            o.cuda_graphs = true;
+            auto graph = solve(m, o);
+            require(graph.status == "OPTIMAL", "sparse QP graph solve");
+            near(graph.accuracy.objective, r.accuracy.objective, 1e-6);
+        }
+    }
+    auto fingerprint = m.fingerprint();
+    write_model(m, "/tmp/vantage-sparse-qp-test.json");
+    auto copy = read_model("/tmp/vantage-sparse-qp-test.json");
+    require(copy.fingerprint() == fingerprint, "full Q JSON roundtrip");
+    write_model(m, "/tmp/vantage-sparse-qp-test.mps");
+    copy = read_model("/tmp/vantage-sparse-qp-test.mps");
+    auto a = verify(copy, {1, 2}, {0});
+    near(a.objective, -7);
+    auto bad = m;
+    bad.Q = Sparse::build(2, 2, {{0, 0, 1}, {0, 1, 2}, {1, 0, 2}, {1, 1, 1}});
+    bool rejected = false;
+    try {
+        bad.validate();
+    } catch (const std::exception &) {
+        rejected = true;
+    }
+    require(rejected, "indefinite sparse Q rejected");
+    bad = m;
+    bad.Q.value[1] = .9;
+    rejected = false;
+    try {
+        bad.validate();
+    } catch (const std::exception &) {
+        rejected = true;
+    }
+    require(rejected, "asymmetric sparse Q rejected");
+}
+void gpu_execution() {
+    if (!cuda_available())
+        return;
+    auto m = model(2, 2, {{0, 0, 1}, {0, 1, 2}, {1, 0, -1}, {1, 1, 1}});
+    m.c = {1, -2};
+    m.rl = {-1, -2};
+    m.ru = {3, 2};
+    for (double reflection : {0., 1.}) {
+        for (bool graphs : {false, true}) {
+            auto cpu = cpu_backend(m, {0, 0}, {0, 0}, false, true, reflection, false);
+            auto gpu = cuda_backend(m, {0, 0}, {0, 0}, false, true, reflection, false, graphs, "32",
+                                    "fp64");
+            for (int k = 0; k < 30; ++k) {
+                require(cpu->advance(1, .1, .1) == gpu->advance(1, .1, .1),
+                        "anchored progress parity");
+                std::vector<double> x, y, ax, ay, gx, gy, gax, gay;
+                cpu->candidates(x, y, ax, ay);
+                gpu->candidates(gx, gy, gax, gay);
+                for (int j = 0; j < 2; ++j) {
+                    near(x[j], gx[j]);
+                    near(y[j], gy[j]);
+                    near(ax[j], gax[j]);
+                    near(ay[j], gay[j]);
+                }
+                if (k == 14) {
+                    cpu->reset(x, y);
+                    gpu->reset(gx, gy);
+                }
+            }
+        }
+    }
+    for (auto width : {"32", "64"})
+        for (auto precision : {"fp64", "mixed"}) {
+            auto cpu = cpu_backend(m, {0, 0}, {0, 0}, false);
+            auto gpu =
+                cuda_backend(m, {0, 0}, {0, 0}, false, false, 0, false, true, width, precision);
+            cpu->advance(30, .1, .1);
+            gpu->advance(30, .1, .1);
+            std::vector<double> x, y, ax, ay, gx, gy, gax, gay;
+            cpu->candidates(x, y, ax, ay);
+            gpu->candidates(gx, gy, gax, gay);
+            for (int j = 0; j < 2; ++j) {
+                near(x[j], gx[j]);
+                near(y[j], gy[j]);
+            }
+        }
+}
 void scaling() {
     auto m = model(4, 3, {{0, 0, 1e-4}, {0, 1, -2e3}, {1, 1, 7}, {1, 2, 3e-2}});
     m.c = {3, -2, 7, 1};
@@ -385,6 +486,8 @@ int main() {
     try {
         acceptance();
         halpern();
+        gpu_execution();
+        sparse_quadratic();
         scaling();
         enhanced_first_order();
         mip_research();

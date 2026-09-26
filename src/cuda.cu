@@ -1,4 +1,5 @@
 #include "internal.hpp"
+#include <climits>
 #include <cuda_runtime.h>
 #include <cusparse.h>
 #include <stdexcept>
@@ -45,6 +46,16 @@ template <class T> struct Buffer {
             check(cudaMemset(p, 0, n * sizeof(T)), "cudaMemset");
     }
 };
+struct Stream {
+    cudaStream_t value = nullptr;
+    Stream() {
+        check(cudaStreamCreateWithFlags(&value, cudaStreamNonBlocking), "create stream");
+    }
+    ~Stream() {
+        if (value)
+            cudaStreamDestroy(value);
+    }
+};
 struct Handle {
     cusparseHandle_t h = nullptr;
     Handle() {
@@ -56,18 +67,69 @@ struct Handle {
     }
 };
 struct Matrix {
-    Buffer<int64_t> ptr, index;
-    Buffer<double> values;
+    std::unique_ptr<Buffer<int64_t>> ptr64, index64;
+    std::unique_ptr<Buffer<int32_t>> ptr32, index32;
+    std::unique_ptr<Buffer<double>> values64;
+    std::unique_ptr<Buffer<float>> values32;
+    size_t nnz;
     cusparseSpMatDescr_t d = nullptr;
-    explicit Matrix(const Sparse &s) : ptr(s.ptr), index(s.index), values(s.value) {
-        sparse_check(cusparseCreateCsr(&d, s.rows, s.cols, s.value.size(), ptr.p, index.p, values.p,
-                                       CUSPARSE_INDEX_64I, CUSPARSE_INDEX_64I,
-                                       CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F),
+    explicit Matrix(const Sparse &s, const std::string &indices, bool mixed) : nnz(s.value.size()) {
+        bool narrow = s.rows <= INT32_MAX && s.cols <= INT32_MAX && nnz <= INT32_MAX;
+        if (indices == "32" && !narrow)
+            throw std::runtime_error("Model exceeds 32-bit CSR limits");
+        narrow = narrow && indices != "64";
+        void *ptr, *index, *values;
+        if (narrow) {
+            std::vector<int32_t> p(s.ptr.begin(), s.ptr.end()), i(s.index.begin(), s.index.end());
+            ptr32 = std::make_unique<Buffer<int32_t>>(p);
+            index32 = std::make_unique<Buffer<int32_t>>(i);
+            ptr = ptr32->p;
+            index = index32->p;
+        } else {
+            ptr64 = std::make_unique<Buffer<int64_t>>(s.ptr);
+            index64 = std::make_unique<Buffer<int64_t>>(s.index);
+            ptr = ptr64->p;
+            index = index64->p;
+        }
+        if (mixed) {
+            std::vector<float> coefficients;
+            for (double v : s.value) {
+                float f = float(v);
+                if (!std::isfinite(f) || (v != 0 && f == 0))
+                    throw std::runtime_error(
+                        "FP32 matrix conversion would overflow or erase a coefficient; use fp64");
+                coefficients.push_back(f);
+            }
+            values32 = std::make_unique<Buffer<float>>(coefficients);
+            values = values32->p;
+        } else {
+            values64 = std::make_unique<Buffer<double>>(s.value);
+            values = values64->p;
+        }
+        sparse_check(cusparseCreateCsr(&d, s.rows, s.cols, nnz, ptr, index, values,
+                                       narrow ? CUSPARSE_INDEX_32I : CUSPARSE_INDEX_64I,
+                                       narrow ? CUSPARSE_INDEX_32I : CUSPARSE_INDEX_64I,
+                                       CUSPARSE_INDEX_BASE_ZERO, mixed ? CUDA_R_32F : CUDA_R_64F),
                      "create CSR");
     }
     ~Matrix() {
         if (d)
             cusparseDestroySpMat(d);
+    }
+};
+struct Graph {
+    cudaGraph_t graph = nullptr;
+    cudaGraphExec_t executable = nullptr;
+    ~Graph() {
+        clear();
+    }
+    void clear() {
+        if (executable)
+            cudaGraphExecDestroy(executable);
+        if (graph)
+            cudaGraphDestroy(graph);
+        executable = nullptr;
+        graph = nullptr;
     }
 };
 struct Vector {
@@ -98,14 +160,16 @@ __device__ double block_sum(double value) {
     return answer;
 }
 __global__ void primal_trial(int64_t n, const double *x, double *trial, double *xb,
-                             const double *aty, const double *c, const double *q, const double *l,
-                             const double *u, double base_tau, const double *state,
-                             double *partial) {
+                             const double *aty, const double *c, const double *q, const double *qx,
+                             bool full_q, const double *l, const double *u, double base_tau,
+                             const double *state, double *partial) {
     auto j = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
     double square = 0;
     if (j < n) {
         double tau = base_tau * state[0];
-        double v = fmin(u[j], fmax(l[j], (x[j] - tau * (c[j] + aty[j])) / (1 + tau * q[j])));
+        double v = fmin(
+            u[j], fmax(l[j], (x[j] - tau * (c[j] + aty[j] + (full_q ? qx[j] + q[j] * x[j] : 0))) /
+                                 (1 + tau * (full_q ? 0 : q[j]))));
         trial[j] = v;
         xb[j] = v - x[j]; // A*dx is more stable than (A*xbar - A*x)/2.
         square = (v - x[j]) * (v - x[j]);
@@ -141,7 +205,8 @@ __global__ void dual_trial(int64_t n, const double *y, double *trial, const doub
     }
 }
 __global__ void decide(int nx, int ny, const double *dx, const double *dy, const double *cross,
-                       double tau, double sigma, bool adaptive, double *state) {
+                       double tau, double sigma, bool adaptive, bool halpern,
+                       bool residual_restarts, double *state) {
     double p = 0, d = 0, c = 0;
     for (int i = threadIdx.x; i < nx; i += 256)
         p += dx[i];
@@ -153,6 +218,10 @@ __global__ void decide(int nx, int ny, const double *dx, const double *dy, const
     d = block_sum(d);
     c = block_sum(c);
     if (!threadIdx.x) {
+        if (state[9]) {
+            state[4] = 0;
+            return;
+        }
         double factor = state[0];
         double energy = p / (tau * factor) + d / (sigma * factor);
         double limit = fabs(c) > 0 ? energy / (2 * fabs(c)) : INFINITY;
@@ -170,33 +239,72 @@ __global__ void decide(int nx, int ny, const double *dx, const double *dy, const
             state[1] += factor;
             state[2] += 1;
             state[5] = factor / state[1];
+            if (halpern) {
+                double residual = sqrt(fmax(0., energy - 2 * c));
+                if (state[6] == 0)
+                    state[7] = residual;
+                state[10] = 1 / (state[6] + 2);
+                state[6] += 1;
+                state[9] = residual_restarts && state[6] >= 10 &&
+                           (residual <= .2 * state[7] ||
+                            (residual <= .8 * state[7] && residual > state[8]) ||
+                            state[6] >= fmax(10., state[2] / 2));
+                state[8] = residual;
+            }
         } else
             state[3] += 1;
     }
 }
 __global__ void commit_primal(int64_t n, double *x, const double *trial, double *avg,
-                              const double *state) {
+                              const double *state, const double *anchor, bool halpern,
+                              double reflection) {
     auto j = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
     if (j < n && state[4]) {
-        x[j] = trial[j];
-        avg[j] += (x[j] - avg[j]) * state[5];
+        double old = x[j];
+        if (halpern) {
+            avg[j] = trial[j];
+            x[j] = state[10] * anchor[j] +
+                   (1 - state[10]) * ((1 + reflection) * trial[j] - reflection * old);
+        } else {
+            x[j] = trial[j];
+            avg[j] += (x[j] - avg[j]) * state[5];
+        }
     }
 }
 __global__ void commit_dual(int64_t n, double *y, const double *trial, double *avg,
-                            double *previous_ax, const double *delta, const double *state) {
+                            double *previous_ax, const double *delta, const double *state,
+                            const double *anchor, const double *anchor_ax, bool halpern,
+                            double reflection) {
     auto i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
     if (i < n && state[4]) {
-        y[i] = trial[i];
-        avg[i] += (y[i] - avg[i]) * state[5];
-        previous_ax[i] += delta[i];
+        if (halpern) {
+            avg[i] = trial[i];
+            y[i] = state[10] * anchor[i] +
+                   (1 - state[10]) * ((1 + reflection) * trial[i] - reflection * y[i]);
+            previous_ax[i] = state[10] * anchor_ax[i] +
+                             (1 - state[10]) * (previous_ax[i] + (1 + reflection) * delta[i]);
+        } else {
+            y[i] = trial[i];
+            avg[i] += (y[i] - avg[i]) * state[5];
+            previous_ax[i] += delta[i];
+        }
     }
 }
 class CudaBackend final : public IterationBackend {
+    Stream stream;
     Handle handle;
     Matrix a, at;
+    std::unique_ptr<Matrix> quadratic;
+    std::unique_ptr<Buffer<double>> quadratic_product;
+    std::unique_ptr<Vector> q_input, q_output;
+    double a_norm = 0, q_norm = 0;
     Buffer<double> x, y, xb, xa, ya, ax, aty, c, q, lb, ub, rl, ru;
     Buffer<double> trial_x, trial_y, previous_ax, dx, dy, cross, state;
-    bool adaptive;
+    Buffer<double> anchor_x, anchor_y, anchor_ax;
+    bool adaptive, halpern, residual_restarts, graphs;
+    double reflection, graph_tau = 0, graph_sigma = 0;
+    Graph graph;
+    bool request_restart = false;
     int64_t accepted = 0, rejected = 0;
     int empty_chunks = 0;
     Vector vx, vy, vax, vaty;
@@ -204,13 +312,44 @@ class CudaBackend final : public IterationBackend {
 
   public:
     CudaBackend(const Model &m, const std::vector<double> &px, const std::vector<double> &py,
-                bool adapt)
-        : a(m.A), at(m.A.transpose()), x(px), y(py), xb(px), xa(px.size()), ya(py.size()),
-          ax(py.size()), aty(px.size()), c(m.c), q(m.q), lb(m.lb), ub(m.ub), rl(m.rl), ru(m.ru),
-          trial_x(px.size()), trial_y(py.size()), previous_ax(m.A.multiply(px)),
-          dx((px.size() + 255) / 256), dy((py.size() + 255) / 256), cross((py.size() + 255) / 256),
-          state(std::vector<double>{1, 0, 0, 0, 0, 0}), adaptive(adapt), vx(xb.n, xb.p),
-          vy(y.n, y.p), vax(ax.n, ax.p), vaty(aty.n, aty.p) {
+                bool adapt, bool anchored, double reflect, bool residual_restart, bool graph_mode,
+                const std::string &indices, const std::string &precision)
+        : a(m.A, indices, precision == "mixed"), at(m.A.transpose(), indices, precision == "mixed"),
+          x(px), y(py), xb(px), xa(px.size()), ya(py.size()), ax(py.size()), aty(px.size()), c(m.c),
+          q(m.q), lb(m.lb), ub(m.ub), rl(m.rl), ru(m.ru), trial_x(px.size()), trial_y(py.size()),
+          previous_ax(m.A.multiply(px)), dx((px.size() + 255) / 256), dy((py.size() + 255) / 256),
+          cross((py.size() + 255) / 256),
+          state(std::vector<double>{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}),
+          anchor_x(anchored ? px : std::vector<double>{}),
+          anchor_y(anchored ? py : std::vector<double>{}),
+          anchor_ax(anchored ? m.A.multiply(px) : std::vector<double>{}), adaptive(adapt),
+          halpern(anchored), residual_restarts(residual_restart), graphs(graph_mode),
+          reflection(reflect), vx(xb.n, xb.p), vy(y.n, y.p), vax(ax.n, ax.p), vaty(aty.n, aty.p) {
+        sparse_check(cusparseSetStream(handle.h, stream.value), "set sparse stream");
+        if (!m.Q.value.empty()) {
+            if (precision != "fp64")
+                throw std::runtime_error("Sparse QP requires FP64 matrices");
+            adaptive = false;
+            q_norm = m.quadratic_norm_bound();
+            quadratic = std::make_unique<Matrix>(m.Q, indices, false);
+            quadratic_product = std::make_unique<Buffer<double>>(m.c.size());
+            q_input = std::make_unique<Vector>(x.n, x.p);
+            q_output = std::make_unique<Vector>(x.n, quadratic_product->p);
+            std::vector<double> cols(m.c.size());
+            double rowmax = 0;
+            for (int64_t i = 0; i < m.A.rows; ++i) {
+                double sum = 0;
+                for (auto k = m.A.ptr[i]; k < m.A.ptr[i + 1]; ++k) {
+                    sum += std::abs(m.A.value[k]);
+                    cols[m.A.index[k]] += std::abs(m.A.value[k]);
+                }
+                rowmax = std::max(rowmax, sum);
+            }
+            double colmax = 0;
+            for (auto v : cols)
+                colmax = std::max(colmax, v);
+            a_norm = std::sqrt(rowmax) * std::sqrt(colmax);
+        }
         xa.zero();
         ya.zero();
         ax.zero();
@@ -227,57 +366,134 @@ class CudaBackend final : public IterationBackend {
                                                  CUSPARSE_SPMV_CSR_ALG2, &s2),
                          "At*y buffer size");
         }
-        workspace = std::make_unique<Buffer<char>>(std::max(s1, s2));
+        size_t sq = 0;
+        if (quadratic)
+            sparse_check(cusparseSpMV_bufferSize(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE, &one,
+                                                 quadratic->d, q_input->d, &zero, q_output->d,
+                                                 CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG2, &sq),
+                         "Q*x workspace");
+        workspace = std::make_unique<Buffer<char>>(std::max({s1, s2, sq}));
+        check(cudaDeviceSynchronize(), "backend initialization sync");
     }
 
     int64_t rejected_steps() const override {
         return rejected;
     }
-    int advance(int count, double tau, double sigma) override {
+    bool restart_requested() const override {
+        return request_restart;
+    }
+    void launch_iteration(double tau, double sigma) {
         double one = 1, zero = 0;
-        for (int i = 0; i < count; i++) {
-            if (a.values.n)
+        if (a.nnz)
+            sparse_check(cusparseSpMV(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE, &one, at.d, vy.d,
+                                      &zero, vaty.d, CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG2,
+                                      workspace->p),
+                         "SpMV At*y");
+        if (quadratic)
+            sparse_check(cusparseSpMV(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE, &one,
+                                      quadratic->d, q_input->d, &zero, q_output->d, CUDA_R_64F,
+                                      CUSPARSE_SPMV_CSR_ALG2, workspace->p),
+                         "Q*x");
+        if (x.n)
+            primal_trial<<<dx.n, 256, 0, stream.value>>>(
+                x.n, x.p, trial_x.p, xb.p, aty.p, c.p, q.p,
+                quadratic_product ? quadratic_product->p : nullptr, bool(quadratic), lb.p, ub.p,
+                tau, state.p, dx.p);
+        check(cudaGetLastError(), "primal trial kernel");
+        if (a.nnz)
+            sparse_check(cusparseSpMV(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE, &one, a.d, vx.d,
+                                      &zero, vax.d, CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG2,
+                                      workspace->p),
+                         "SpMV A*dx");
+        if (y.n)
+            dual_trial<<<dy.n, 256, 0, stream.value>>>(y.n, y.p, trial_y.p, ax.p, previous_ax.p,
+                                                       rl.p, ru.p, sigma, state.p, dy.p, cross.p);
+        check(cudaGetLastError(), "dual trial kernel");
+        decide<<<1, 256, 0, stream.value>>>(dx.n, dy.n, dx.p, dy.p, cross.p, tau, sigma, adaptive,
+                                            halpern, residual_restarts, state.p);
+        check(cudaGetLastError(), "step decision kernel");
+        if (x.n)
+            commit_primal<<<dx.n, 256, 0, stream.value>>>(x.n, x.p, trial_x.p, xa.p, state.p,
+                                                          anchor_x.p, halpern, reflection);
+        if (y.n)
+            commit_dual<<<dy.n, 256, 0, stream.value>>>(y.n, y.p, trial_y.p, ya.p, previous_ax.p,
+                                                        ax.p, state.p, anchor_y.p, anchor_ax.p,
+                                                        halpern, reflection);
+        check(cudaGetLastError(), "commit kernels");
+    }
+    int advance(int count, double tau, double sigma) override {
+        if (quadratic) {
+            double safety = std::sqrt(tau * sigma) * a_norm + tau * q_norm;
+            double scale = safety > 0 ? std::min(1., .9 / safety) : 1.;
+            tau *= scale;
+            sigma *= scale;
+        }
+        if (graphs && (!graph.executable || tau != graph_tau || sigma != graph_sigma)) {
+            graph.clear();
+            // Warm sparse-library lazy initialization without modifying iteration state.
+            double one = 1, zero = 0;
+            if (a.nnz)
                 sparse_check(cusparseSpMV(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE, &one, at.d,
                                           vy.d, &zero, vaty.d, CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG2,
                                           workspace->p),
-                             "SpMV At*y");
-            if (x.n)
-                primal_trial<<<dx.n, 256>>>(x.n, x.p, trial_x.p, xb.p, aty.p, c.p, q.p, lb.p, ub.p,
-                                            tau, state.p, dx.p);
-            check(cudaGetLastError(), "primal trial kernel");
-            if (a.values.n)
-                sparse_check(cusparseSpMV(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE, &one, a.d,
-                                          vx.d, &zero, vax.d, CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG2,
-                                          workspace->p),
-                             "SpMV A*dx");
-            if (y.n)
-                dual_trial<<<dy.n, 256>>>(y.n, y.p, trial_y.p, ax.p, previous_ax.p, rl.p, ru.p,
-                                          sigma, state.p, dy.p, cross.p);
-            check(cudaGetLastError(), "dual trial kernel");
-            decide<<<1, 256>>>(dx.n, dy.n, dx.p, dy.p, cross.p, tau, sigma, adaptive, state.p);
-            check(cudaGetLastError(), "step decision kernel");
-            if (x.n)
-                commit_primal<<<dx.n, 256>>>(x.n, x.p, trial_x.p, xa.p, state.p);
-            if (y.n)
-                commit_dual<<<dy.n, 256>>>(y.n, y.p, trial_y.p, ya.p, previous_ax.p, ax.p, state.p);
-            check(cudaGetLastError(), "commit kernels");
+                             "graph warmup");
+            check(cudaDeviceSynchronize(), "graph warmup sync");
+            check(cudaStreamBeginCapture(stream.value, cudaStreamCaptureModeGlobal),
+                  "graph begin capture");
+            try {
+                launch_iteration(tau, sigma);
+            } catch (...) {
+                cudaGraph_t failed = nullptr;
+                cudaStreamEndCapture(stream.value, &failed);
+                if (failed)
+                    cudaGraphDestroy(failed);
+                throw;
+            }
+            check(cudaStreamEndCapture(stream.value, &graph.graph), "graph end capture");
+            check(cudaGraphInstantiate(&graph.executable, graph.graph, 0), "graph instantiate");
+            graph_tau = tau;
+            graph_sigma = sigma;
         }
+        for (int i = 0; i < count; i++) {
+            if (graphs)
+                check(cudaGraphLaunch(graph.executable, stream.value), "PDHG graph launch");
+            else
+                launch_iteration(tau, sigma);
+        }
+        check(cudaStreamSynchronize(stream.value), "iteration chunk sync");
         std::vector<double> counters;
         state.download(counters); // Synchronizes this monitoring chunk, not every trial.
         int progress = int(int64_t(counters[2]) - accepted);
         accepted = int64_t(counters[2]);
         rejected = int64_t(counters[3]);
+        request_restart = counters[9] != 0;
         empty_chunks = progress ? 0 : empty_chunks + 1;
-        if (empty_chunks >= 4 || (!adaptive && progress != count))
+        if (empty_chunks >= 4 || (!adaptive && !halpern && progress != count))
             throw std::runtime_error("CUDA PDHG backtracking stalled or produced nonfinite steps");
         return progress;
     }
     void candidates(std::vector<double> &px, std::vector<double> &py, std::vector<double> &pax,
                     std::vector<double> &pay) override {
+        check(cudaStreamSynchronize(stream.value), "candidate sync");
         x.download(px);
         y.download(py);
         xa.download(pax);
         ya.download(pay);
+        // Match the CPU activity rebasing at candidate checkpoints.
+        refresh_activity(px);
+    }
+    void refresh_activity(const std::vector<double> &px) {
+        xb.upload(px);
+        double one = 1, zero = 0;
+        if (a.nnz) {
+            sparse_check(cusparseSpMV(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE, &one, a.d, vx.d,
+                                      &zero, vax.d, CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG2,
+                                      workspace->p),
+                         "refresh activity");
+            check(cudaStreamSynchronize(stream.value), "activity sync");
+            check(cudaMemcpy(previous_ax.p, ax.p, ax.n * sizeof(double), cudaMemcpyDeviceToDevice),
+                  "refresh activity copy");
+        }
     }
     void reset(const std::vector<double> &px, const std::vector<double> &py) override {
         x.upload(px);
@@ -285,17 +501,18 @@ class CudaBackend final : public IterationBackend {
         y.upload(py);
         xa.zero();
         ya.zero();
-        // Recompute A*x at restarts to avoid accumulated recurrence roundoff.
-        double one = 1, zero = 0;
-        if (a.values.n) {
-            sparse_check(cusparseSpMV(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE, &one, a.d, vx.d,
-                                      &zero, vax.d, CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG2,
-                                      workspace->p),
-                         "restart A*x");
-            check(cudaMemcpy(previous_ax.p, ax.p, ax.n * sizeof(double), cudaMemcpyDeviceToDevice),
-                  "restart activity");
+        refresh_activity(px);
+        if (halpern) {
+            anchor_x.upload(px);
+            anchor_y.upload(py);
+            check(cudaMemcpy(anchor_ax.p, previous_ax.p, previous_ax.n * sizeof(double),
+                             cudaMemcpyDeviceToDevice),
+                  "anchor activity");
+            check(cudaMemset(state.p + 6, 0, 5 * sizeof(double)), "reset Halpern epoch");
+            request_restart = false;
         }
         check(cudaMemset(state.p + 1, 0, sizeof(double)), "reset averaging mass");
+        check(cudaDeviceSynchronize(), "backend reset sync");
     }
 };
 } // namespace
@@ -310,14 +527,20 @@ std::string cuda_description() {
     check(cudaGetDeviceProperties(&p, 0), "GPU properties");
     return std::string(p.name) + " (" + std::to_string(p.totalGlobalMem / (1024 * 1024)) + " MiB)";
 }
-std::unique_ptr<IterationBackend> cuda_backend(const Model &m, const std::vector<double> &x,
-                                               const std::vector<double> &y, bool adaptive) {
+std::unique_ptr<IterationBackend>
+cuda_backend(const Model &m, const std::vector<double> &x, const std::vector<double> &y,
+             bool adaptive, bool halpern, double reflection, bool residual_restarts, bool graphs,
+             const std::string &indices, const std::string &precision) {
     size_t free = 0, total = 0;
     check(cudaMemGetInfo(&free, &total), "cudaMemGetInfo");
-    long double estimate = 48.L * m.A.value.size() + 192.L * (m.A.rows + m.A.cols + 2);
+    long double estimate =
+        48.L * (m.A.value.size() + m.Q.value.size()) + 240.L * (m.A.rows + m.A.cols + 2);
     if (estimate > .8L * free)
         throw std::runtime_error(
             "Estimated GPU storage exceeds 80% of available memory; use --device cpu");
-    return std::make_unique<CudaBackend>(m, x, y, adaptive);
+    if (halpern && adaptive)
+        throw std::runtime_error("Halpern requires a fixed PDHG operator");
+    return std::make_unique<CudaBackend>(m, x, y, adaptive, halpern, reflection, residual_restarts,
+                                         graphs, indices, precision);
 }
 } // namespace vantage

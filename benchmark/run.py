@@ -34,6 +34,9 @@ def main():
     p.add_argument('--polishing',action='store_true')
     p.add_argument('--cuts',action='store_true')
     p.add_argument('--primal-heuristic',choices=['repair','pump','rins','all'],default='repair')
+    p.add_argument("--cuda-graphs",action="store_true")
+    p.add_argument("--gpu-indices",choices=["auto","32","64"],default="auto")
+    p.add_argument("--matrix-precision",choices=["fp64","mixed"],default="fp64")
     a=p.parse_args()
     if a.runs<1:p.error('--runs must be positive')
     if a.iterations<1:p.error('--iterations must be positive')
@@ -81,6 +84,10 @@ def main():
                     if a.no_adaptive:command+=['--no-adaptive']
                 elif solver=='highs':command=[sys.executable,str(ROOT/'benchmark/adapters/highs.py'),str(mps),'--time-limit',str(a.time_limit),'--threads',str(a.threads),'--tol',str(a.tol)]
                 else:raise ValueError(f'Unknown solver {solver}')
+                if solver=='cuda':
+                    if a.cuda_graphs:command+=['--cuda-graphs']
+                    if a.gpu_indices!='auto':command+=['--gpu-indices',a.gpu_indices]
+                    if a.matrix_precision!='fp64':command+=['--matrix-precision',a.matrix_precision]
                 data,stdout,stderr,code,wall=execute(command,a.time_limit+30)
                 (raw/f'{name}.stdout').write_text(stdout);(raw/f'{name}.stderr').write_text(stderr)
                 accuracy=data.get('accuracy',{})

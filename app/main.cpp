@@ -10,7 +10,8 @@ int main(int argc, char **argv) {
     try {
         if (argc < 2) {
             std::cout
-                << "NIRYUKTI 0.2 — Independent Sparse Optimization Engine\nCommands: solve MODEL, inspect MODEL, explain MODEL, "
+                << "NIRYUKTI 0.2 — Independent Sparse Optimization Engine\nCommands: solve MODEL, "
+                   "inspect MODEL, explain MODEL, "
                    "verify MODEL SOLUTION, convert INPUT OUTPUT, devices\nSolve: --device "
                    "cpu|cuda|auto --tol 1e-6 --time-limit 60 --iterations 100000\n       "
                    "--json-out result.json --warm-start result.json --threads 1 --verbose\n  "
@@ -18,6 +19,7 @@ int main(int argc, char **argv) {
                    "--node-limit 10000 --mip-gap 1e-4 --check-every 100\n"
                    "       --scaling ruiz|combined --method pdhg|halpern|rhpdhg|r2hpdhg\n"
                    "       --primal-weight displacement|pid --power-iterations 0 --polishing\n"
+                   "       --cuda-graphs --gpu-indices auto|32|64 --matrix-precision fp64|mixed\n"
                    "       --branching fractional|reliability --cuts\n       --primal-heuristic "
                    "repair|pump|rins|all\n"
                    "       halpern: experimental CPU LP, requires --no-adaptive\n";
@@ -132,6 +134,12 @@ int main(int argc, char **argv) {
                 o.primal_weight = val();
             else if (a == "--power-iterations")
                 o.power_iterations = std::stoi(val());
+            else if (a == "--cuda-graphs")
+                o.cuda_graphs = true;
+            else if (a == "--gpu-indices")
+                o.gpu_indices = val();
+            else if (a == "--matrix-precision")
+                o.matrix_precision = val();
             else if (a == "--polishing")
                 o.polishing = true;
             else if (a == "--primal-heuristic")
@@ -174,6 +182,9 @@ int main(int argc, char **argv) {
                         {"branching", o.branching},
                         {"primal_weight", o.primal_weight},
                         {"power_iterations", o.power_iterations},
+                        {"cuda_graphs", o.cuda_graphs},
+                        {"gpu_indices", o.gpu_indices},
+                        {"matrix_precision", o.matrix_precision},
                         {"polishing", o.polishing},
                         {"cuts", o.cuts},
                         {"primal_heuristic", o.primal_heuristic},

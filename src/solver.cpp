@@ -35,9 +35,16 @@ Result solve(const Model &m, const Options &o) {
         throw std::runtime_error("Unknown scaling: use ruiz or combined");
     if (o.branching != "fractional" && o.branching != "reliability")
         throw std::runtime_error("Unknown branching: use fractional or reliability");
-    if (anchored_method(o) && (o.adaptive || o.device == "cuda" || m.is_qp() || m.is_mip()))
-        throw std::runtime_error(
-            "Experimental Halpern supports continuous LP on CPU with --no-adaptive");
+    if (anchored_method(o) && (o.adaptive || m.is_qp() || m.is_mip()))
+        throw std::runtime_error("Experimental Halpern supports continuous LP with --no-adaptive");
+    if (o.gpu_indices != "auto" && o.gpu_indices != "32" && o.gpu_indices != "64")
+        throw std::runtime_error("GPU indices must be auto, 32 or 64");
+    if (o.matrix_precision != "fp64" && o.matrix_precision != "mixed")
+        throw std::runtime_error("Matrix precision must be fp64 or mixed");
+    if ((o.cuda_graphs || o.matrix_precision == "mixed") && o.device == "cpu")
+        throw std::runtime_error("CUDA graphs and mixed matrix precision require a CUDA backend");
+    if (anchored_method(o) && o.matrix_precision == "mixed")
+        throw std::runtime_error("Fixed Halpern operators require FP64 matrices");
     if (!o.initial_x.empty() && o.initial_x.size() != m.c.size())
         throw std::runtime_error("Warm-start primal dimension mismatch");
     if (!o.initial_y.empty() && o.initial_y.size() != m.rl.size())
@@ -51,7 +58,7 @@ Result solve(const Model &m, const Options &o) {
 #ifdef _OPENMP
     omp_set_num_threads(o.threads);
 #endif
-    if (std::any_of(m.q.begin(), m.q.end(), [](double q) { return q < 0; })) {
+    if (m.Q.value.empty() && std::any_of(m.q.begin(), m.q.end(), [](double q) { return q < 0; })) {
         Result r;
         r.status = "UNSUPPORTED";
         r.message = "Nonconvex quadratic objective";
@@ -74,10 +81,8 @@ Result solve(const Model &m, const Options &o) {
     return result;
 }
 Result solve_continuous(const Model &original, const Options &o) {
-    if (anchored_method(o) &&
-        (o.adaptive || o.device == "cuda" || original.is_qp() || original.is_mip()))
-        throw std::runtime_error(
-            "Experimental Halpern supports continuous LP on CPU with --no-adaptive");
+    if (anchored_method(o) && (o.adaptive || original.is_qp() || original.is_mip()))
+        throw std::runtime_error("Experimental Halpern supports continuous LP with --no-adaptive");
     auto start = Clock::now();
     Result r;
     Verifier verifier(original);
@@ -145,7 +150,7 @@ Result solve_continuous(const Model &original, const Options &o) {
     for (auto s : colsum)
         colmax = std::max(colmax, s);
     double norm = std::sqrt(rowmax) * std::sqrt(colmax);
-    if (o.power_iterations > 0) {
+    if (o.power_iterations > 0 && m.Q.value.empty()) {
         r.operator_norm_estimate = power_norm(m.A, o.power_iterations);
         // A power estimate is not an upper bound. Only the backtracking path may
         // use it for larger initial steps; fixed-operator methods retain the bound.
@@ -164,17 +169,27 @@ Result solve_continuous(const Model &original, const Options &o) {
         if (c2 > 1e-24 && b2 > 1e-24)
             weight = std::clamp(std::sqrt(double(c2 / b2)), 1e-4, 1e4);
     }
-    bool usecuda = o.device == "cuda" || (o.method == "pdhg" && o.device == "auto" &&
-                                          cuda_available() && m.A.value.size() >= 100000);
+    bool usecuda = o.device == "cuda" ||
+                   (o.device == "auto" && cuda_available() &&
+                    (m.A.value.size() >= 100000 || o.cuda_graphs || o.matrix_precision == "mixed"));
     r.backend = usecuda ? "cuda" : "cpu";
     r.device_name = usecuda ? cuda_description() : "CPU";
     auto transfer = Clock::now();
     bool residual_restarts = o.method == "rhpdhg" || o.method == "r2hpdhg";
     auto backend = usecuda
-                       ? cuda_backend(m, x, y, o.adaptive)
+                       ? cuda_backend(m, x, y, o.adaptive, anchored_method(o),
+                                      o.method == "r2hpdhg" ? 1 : 0, residual_restarts && o.restart,
+                                      o.cuda_graphs, o.gpu_indices, o.matrix_precision)
                        : cpu_backend(m, x, y, o.adaptive, anchored_method(o),
                                      o.method == "r2hpdhg" ? 1 : 0, residual_restarts && o.restart);
     r.transfer_seconds = elapsed(transfer);
+    if (usecuda) {
+        bool fits32 =
+            m.A.rows <= INT32_MAX && m.A.cols <= INT32_MAX && m.A.value.size() <= INT32_MAX;
+        r.gpu_index_bits = o.gpu_indices == "64" || !fits32 ? 64 : 32;
+        r.graph_execution = o.cuda_graphs;
+        r.matrix_precision = o.matrix_precision;
+    }
     double restart_kkt = r.accuracy.kkt;
     int64_t since_restart = 0;
     std::vector<double> epochx = x, epochy = y;

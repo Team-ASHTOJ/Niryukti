@@ -83,3 +83,8 @@ The dashboard now exposes iteration budget (default 100,000, maximum 2,000,000) 
 - highs: 3/3 optimal; median end-to-end 0.019490 s.
 
 No numerical core changes were made after the tested/measured 0.2 executable was built. Subsequent work added execution controls, benchmark budget metadata and documentation. The dashboard is available at http://127.0.0.1:8080.
+
+
+## 27 September 2026 — optimization checkpoint
+
+Added and tested CUDA Halpern variants, graph execution, 32/64-bit CSR selection, experimental mixed matrices and sparse off-diagonal convex QP with CPU/CUDA gradient paths and original-space verification. CUDA research assertions: 2,613. Stopped at user request; partial benchmark evidence retained without speedup claims. See [handoff and pending work](optimization_handoff_20260927.md) and [audit](optimization_audit.md).

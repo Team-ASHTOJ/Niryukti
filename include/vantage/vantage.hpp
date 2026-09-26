@@ -25,6 +25,7 @@ enum class VarType { Continuous, Integer, Binary };
 struct Model {
     std::string name = "model";
     Sparse A;
+    Sparse Q; // Additional symmetric quadratic matrix; q retains the diagonal shorthand.
     std::vector<double> c, q, lb, ub, rl, ru; // q is the diagonal of Q; canonical minimization.
     std::vector<VarType> types;
     std::vector<std::string> names, row_names;
@@ -33,6 +34,7 @@ struct Model {
     bool is_mip() const;
     bool is_qp() const;
     std::string fingerprint() const;
+    double quadratic_norm_bound() const;
 };
 struct Options {
     std::string device = "auto";
@@ -47,6 +49,8 @@ struct Options {
     int power_iterations = 0;
     bool polishing = false;
     bool cuts = false;
+    bool cuda_graphs = false;
+    std::string gpu_indices = "auto", matrix_precision = "fp64";
     std::string primal_heuristic = "repair";
 };
 struct Accuracy {
@@ -81,6 +85,9 @@ struct Result {
     int64_t weight_updates = 0, polishing_iterations = 0, polishing_attempts = 0;
     double operator_norm_estimate = 0;
     int64_t cuts_added = 0;
+    int gpu_index_bits = 0;
+    bool graph_execution = false;
+    std::string matrix_precision = "fp64";
     int64_t pump_rounds = 0, rins_calls = 0, heuristic_nodes = 0;
 };
 Model read_model(const std::string &path);

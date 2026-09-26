@@ -6,6 +6,7 @@ class CpuBackend final : public IterationBackend {
     Sparse at;
     std::vector<double> x, y, delta_x, xa, ya, gradient, trial_x, trial_y, ax, next_ax;
     bool adaptive, halpern;
+    double a_norm = 0, q_norm = 0;
     std::vector<double> anchor_x, anchor_y, anchor_ax;
     int64_t epoch_steps = 0;
     double reflection;
@@ -21,6 +22,24 @@ class CpuBackend final : public IterationBackend {
           gradient(px.size()), trial_x(px.size()), trial_y(py.size()), ax(m.A.multiply(px)),
           next_ax(py.size()), adaptive(adapt), halpern(anchored), reflection(reflect),
           fixed_point_restarts(residual_restarts) {
+        if (!m.Q.value.empty()) {
+            adaptive = false;
+            q_norm = m.quadratic_norm_bound();
+            std::vector<double> cols(m.c.size());
+            double rowmax = 0;
+            for (int64_t i = 0; i < m.A.rows; ++i) {
+                double sum = 0;
+                for (auto k = m.A.ptr[i]; k < m.A.ptr[i + 1]; ++k) {
+                    sum += std::abs(m.A.value[k]);
+                    cols[m.A.index[k]] += std::abs(m.A.value[k]);
+                }
+                rowmax = std::max(rowmax, sum);
+            }
+            double colmax = 0;
+            for (auto v : cols)
+                colmax = std::max(colmax, v);
+            a_norm = std::sqrt(rowmax) * std::sqrt(colmax);
+        }
         if (halpern) {
             anchor_x = x;
             anchor_y = y;
@@ -34,6 +53,12 @@ class CpuBackend final : public IterationBackend {
         return request_restart;
     }
     int advance(int count, double primal_step, double dual_step) override {
+        if (!m.Q.value.empty()) {
+            double safety = std::sqrt(primal_step * dual_step) * a_norm + primal_step * q_norm;
+            double scale = safety > 0 ? std::min(1., .9 / safety) : 1.;
+            primal_step *= scale;
+            dual_step *= scale;
+        }
         for (int it = 0; it < count; it++) {
 #ifdef _OPENMP
 #pragma omp parallel for if (m.A.cols > 10000)
@@ -44,6 +69,11 @@ class CpuBackend final : public IterationBackend {
                     g += at.value[k] * y[at.index[k]];
                 gradient[j] = g;
             }
+            if (!m.Q.value.empty()) {
+                auto qx = m.Q.multiply(x);
+                for (size_t j = 0; j < x.size(); ++j)
+                    gradient[j] += qx[j] + m.q[j] * x[j];
+            }
             bool success = false;
             for (int attempt = 0; attempt < 40; attempt++) {
                 double tau = primal_step * factor, sigma = dual_step * factor;
@@ -52,7 +82,8 @@ class CpuBackend final : public IterationBackend {
 #pragma omp parallel for reduction(+ : dx2) if (m.A.cols > 10000)
 #endif
                 for (int64_t j = 0; j < m.A.cols; j++) {
-                    trial_x[j] = std::clamp((x[j] - tau * gradient[j]) / (1 + tau * m.q[j]),
+                    trial_x[j] = std::clamp((x[j] - tau * gradient[j]) /
+                                                (1 + tau * (m.Q.value.empty() ? m.q[j] : 0)),
                                             m.lb[j], m.ub[j]);
                     double dx = trial_x[j] - x[j];
                     dx2 += dx * dx;

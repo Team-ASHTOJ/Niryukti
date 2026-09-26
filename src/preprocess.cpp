@@ -116,6 +116,19 @@ std::vector<double> Prepared::restore_y(const std::vector<double> &y, size_t n) 
 }
 Prepared prepare(const Model &src, const Options &o) {
     Prepared p;
+    if (!src.Q.value.empty()) {
+        // Full-Q transformations need cross-term postsolve bookkeeping. Preserve the
+        // original sparse model until those transformations are implemented.
+        p.model = src;
+        p.fixed.assign(src.c.size(), 0);
+        p.cols.resize(src.c.size());
+        p.rows.resize(src.rl.size());
+        std::iota(p.cols.begin(), p.cols.end(), 0);
+        std::iota(p.rows.begin(), p.rows.end(), 0);
+        p.column_scale.assign(src.c.size(), 1);
+        p.row_scale.assign(src.rl.size(), 1);
+        return p;
+    }
     p.fixed.assign(src.c.size(), 0);
     Model &m = p.model;
     m.name = src.name;

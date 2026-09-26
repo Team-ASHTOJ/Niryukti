@@ -128,6 +128,7 @@ Accuracy Verifier::evaluate(const std::vector<double> &x, const std::vector<doub
             }
         }
     }
+    auto qx = m.Q.value.empty() ? std::vector<double>(x.size(), 0) : m.Q.multiply(x);
     double cscale = 1;
     for (auto v : m.c)
         cscale = std::max(cscale, 1 + std::abs(v));
@@ -138,8 +139,8 @@ Accuracy Verifier::evaluate(const std::vector<double> &x, const std::vector<doub
         a.primal_absolute = std::max(a.primal_absolute, v);
         if (m.types[j] != VarType::Continuous)
             a.integrality = std::max(a.integrality, std::abs(x[j] - std::round(x[j])));
-        a.objective += m.c[j] * x[j] + .5 * m.q[j] * x[j] * x[j];
-        double linear = m.c[j] + aty[j], g = linear + m.q[j] * x[j];
+        a.objective += m.c[j] * x[j] + .5 * m.q[j] * x[j] * x[j] + .5 * x[j] * qx[j];
+        double linear = m.c[j] + aty[j], g = linear + m.q[j] * x[j] + qx[j];
         if (!std::isfinite(linear) || !std::isfinite(g))
             return Accuracy{};
         // Box normal-cone stationarity via the projected-gradient mapping.
@@ -151,6 +152,15 @@ Accuracy Verifier::evaluate(const std::vector<double> &x, const std::vector<doub
         if (g < 0 && std::isfinite(m.ub[j]))
             complement += std::abs((long double)g * (m.ub[j] - x[j]));
         // Independent separable minimization of the Lagrangian over the ORIGINAL box.
+        if (!m.Q.value.empty()) {
+            // Convex affine minorant at x, minimized over the variable box.
+            double arg = g > 0 ? m.lb[j] : g < 0 ? m.ub[j] : std::clamp(0., m.lb[j], m.ub[j]);
+            if (!std::isfinite(arg))
+                bound_ok = false;
+            else
+                box_min += (long double)g * arg - (long double)(m.q[j] * x[j] + qx[j]) * x[j] / 2;
+            continue;
+        }
         double arg = 0;
         if (m.q[j] > 0)
             arg = std::clamp(-linear / m.q[j], m.lb[j], m.ub[j]);
