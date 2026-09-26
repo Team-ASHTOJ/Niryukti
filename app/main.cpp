@@ -9,13 +9,19 @@ int main(int argc, char **argv) {
     std::signal(SIGINT, [](int) { interrupted = 1; });
     try {
         if (argc < 2) {
-            std::cout << "VANTAGE 0.2 — Vector-Accelerated Numerical Toolkit for Advanced Global "
-                         "Optimization\nCommands: solve MODEL, inspect MODEL, explain MODEL, "
-                         "verify MODEL SOLUTION, convert INPUT OUTPUT, devices\nSolve: --device "
-                         "cpu|cuda|auto --tol 1e-6 --time-limit 60 --iterations 100000\n       "
-                         "--json-out result.json --warm-start result.json --threads 1 --verbose\n  "
-                         "     --no-presolve --scaling-passes 5 --no-restart --no-adaptive\n       "
-                         "--node-limit 10000 --mip-gap 1e-4 --check-every 100\n";
+            std::cout
+                << "VANTAGE 0.2 — Vector-Accelerated Numerical Toolkit for Advanced Global "
+                   "Optimization\nCommands: solve MODEL, inspect MODEL, explain MODEL, "
+                   "verify MODEL SOLUTION, convert INPUT OUTPUT, devices\nSolve: --device "
+                   "cpu|cuda|auto --tol 1e-6 --time-limit 60 --iterations 100000\n       "
+                   "--json-out result.json --warm-start result.json --threads 1 --verbose\n  "
+                   "     --no-presolve --scaling-passes 5 --no-restart --no-adaptive\n       "
+                   "--node-limit 10000 --mip-gap 1e-4 --check-every 100\n"
+                   "       --scaling ruiz|combined --method pdhg|halpern|rhpdhg|r2hpdhg\n"
+                   "       --primal-weight displacement|pid --power-iterations 0 --polishing\n"
+                   "       --branching fractional|reliability --cuts\n       --primal-heuristic "
+                   "repair|pump|rins|all\n"
+                   "       halpern: experimental CPU LP, requires --no-adaptive\n";
             return 0;
         }
         std::string cmd = argv[1];
@@ -117,6 +123,22 @@ int main(int argc, char **argv) {
                 o.check_every = std::stoi(val());
             else if (a == "--scaling-passes")
                 o.scaling_passes = std::stoi(val());
+            else if (a == "--scaling")
+                o.scaling = val();
+            else if (a == "--method")
+                o.method = val();
+            else if (a == "--branching")
+                o.branching = val();
+            else if (a == "--primal-weight")
+                o.primal_weight = val();
+            else if (a == "--power-iterations")
+                o.power_iterations = std::stoi(val());
+            else if (a == "--polishing")
+                o.polishing = true;
+            else if (a == "--primal-heuristic")
+                o.primal_heuristic = val();
+            else if (a == "--cuts")
+                o.cuts = true;
             else if (a == "--json-out" || a == "--solution-out")
                 output = val();
             else if (a == "--warm-start")
@@ -148,6 +170,14 @@ int main(int argc, char **argv) {
                         {"iteration_limit", o.iteration_limit},
                         {"threads", o.threads},
                         {"scaling_passes", o.scaling_passes},
+                        {"scaling", o.scaling},
+                        {"method", o.method},
+                        {"branching", o.branching},
+                        {"primal_weight", o.primal_weight},
+                        {"power_iterations", o.power_iterations},
+                        {"polishing", o.polishing},
+                        {"cuts", o.cuts},
+                        {"primal_heuristic", o.primal_heuristic},
                         {"restart", o.restart},
                         {"adaptive", o.adaptive}};
         if (!output.empty()) {

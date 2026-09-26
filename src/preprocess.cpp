@@ -1,6 +1,107 @@
 #include "internal.hpp"
 #include <numeric>
 namespace vantage {
+namespace {
+bool representable(double before, double after) {
+    return std::isfinite(before) ? std::isfinite(after) && (before == 0 || after != 0)
+                                 : before == after;
+}
+// Optional preconditioners never erase a nonzero or turn a finite bound into infinity.
+// Skip unsafe row/column transformations as a whole to preserve the model mapping.
+void extra_scale(Prepared &p, std::vector<double> row, std::vector<double> col) {
+    auto &m = p.model;
+    for (size_t i = 0; i < row.size(); i++) {
+        double f = row[i];
+        bool safe = representable(p.row_scale[i], p.row_scale[i] * f) &&
+                    representable(m.rl[i], m.rl[i] * f) && representable(m.ru[i], m.ru[i] * f);
+        for (auto k = m.A.ptr[i]; k < m.A.ptr[i + 1]; k++)
+            safe &= representable(m.A.value[k], m.A.value[k] * f);
+        if (!safe)
+            continue;
+        p.row_scale[i] *= f;
+        m.rl[i] *= f;
+        m.ru[i] *= f;
+        for (auto k = m.A.ptr[i]; k < m.A.ptr[i + 1]; k++)
+            m.A.value[k] *= f;
+    }
+    for (size_t j = 0; j < col.size(); j++) {
+        double f = col[j];
+        if (!representable(p.column_scale[j], p.column_scale[j] * f) ||
+            !representable(m.c[j], m.c[j] * f) || !representable(m.q[j], m.q[j] * (f * f)) ||
+            !representable(m.lb[j], m.lb[j] / f) || !representable(m.ub[j], m.ub[j] / f))
+            col[j] = 1;
+    }
+    for (size_t k = 0; k < m.A.value.size(); k++) {
+        auto j = m.A.index[k];
+        if (!representable(m.A.value[k], m.A.value[k] * col[j]))
+            col[j] = 1;
+    }
+    for (size_t j = 0; j < col.size(); j++) {
+        double f = col[j];
+        p.column_scale[j] *= f;
+        m.c[j] *= f;
+        m.q[j] *= f * f;
+        m.lb[j] /= f;
+        m.ub[j] /= f;
+    }
+    for (size_t k = 0; k < m.A.value.size(); k++)
+        m.A.value[k] *= col[m.A.index[k]];
+}
+double geometric_factor(double low, double high) {
+    if (high == 0)
+        return 1;
+    // Logarithms avoid overflow/underflow of low * high.
+    return std::exp(
+        std::clamp(-.5 * (std::log(low) + std::log(high)), std::log(1e-3), std::log(1e3)));
+}
+void geometric_scale(Prepared &p) {
+    auto &m = p.model;
+    std::vector<double> row(m.rl.size(), 1), col(m.c.size(), 1);
+    for (size_t i = 0; i < row.size(); i++) {
+        double low = inf, high = 0;
+        for (auto k = m.A.ptr[i]; k < m.A.ptr[i + 1]; k++) {
+            double v = std::abs(m.A.value[k]);
+            if (v > 0) {
+                low = std::min(low, v);
+                high = std::max(high, v);
+            }
+        }
+        row[i] = geometric_factor(low, high);
+    }
+    extra_scale(p, row, col);
+    std::vector<double> low(col.size(), inf), high(col.size());
+    for (size_t k = 0; k < m.A.value.size(); k++) {
+        auto j = m.A.index[k];
+        double v = std::abs(m.A.value[k]);
+        if (v > 0) {
+            low[j] = std::min(low[j], v);
+            high[j] = std::max(high[j], v);
+        }
+    }
+    for (size_t j = 0; j < col.size(); j++)
+        col[j] = geometric_factor(low[j], high[j]);
+    std::fill(row.begin(), row.end(), 1);
+    extra_scale(p, row, col);
+}
+void pock_chambolle_scale(Prepared &p) {
+    auto &m = p.model;
+    std::vector<long double> rows(m.rl.size()), cols(m.c.size());
+    for (size_t i = 0; i < rows.size(); i++)
+        for (auto k = m.A.ptr[i]; k < m.A.ptr[i + 1]; k++) {
+            long double v = std::abs(m.A.value[k]);
+            rows[i] += v;
+            cols[m.A.index[k]] += v;
+        }
+    auto factor = [](long double sum) {
+        return sum > 0 && std::isfinite(sum) ? double(std::clamp(1 / std::sqrt(sum), 1e-3L, 1e3L))
+                                             : 1.;
+    };
+    std::vector<double> row(rows.size()), col(cols.size());
+    std::transform(rows.begin(), rows.end(), row.begin(), factor);
+    std::transform(cols.begin(), cols.end(), col.begin(), factor);
+    extra_scale(p, row, col);
+}
+} // namespace
 std::vector<double> Prepared::restore_x(const std::vector<double> &x) const {
     auto out = fixed;
     for (size_t j = 0; j < cols.size(); j++)
@@ -105,6 +206,8 @@ Prepared prepare(const Model &src, const Options &o) {
     m.A = Sparse::build(m.rl.size(), m.c.size(), std::move(e));
     p.column_scale.assign(m.c.size(), 1);
     p.row_scale.assign(m.rl.size(), 1);
+    if (o.scaling == "combined" && o.scaling_passes > 0)
+        geometric_scale(p);
     // Ruiz infinity-norm equilibration, x_original = D_c x_scaled.
     for (int pass = 0; pass < o.scaling_passes; pass++) {
         for (size_t i = 0; i < m.rl.size(); i++) {
@@ -133,6 +236,8 @@ Prepared prepare(const Model &src, const Options &o) {
         for (size_t k = 0; k < m.A.value.size(); k++)
             m.A.value[k] *= norm[m.A.index[k]];
     }
+    if (o.scaling == "combined" && o.scaling_passes > 0)
+        pock_chambolle_scale(p);
     if (o.scaling_passes > 0) {
         double cnorm = 0;
         for (auto c : m.c)

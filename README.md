@@ -114,6 +114,8 @@ The larger example has 46,720 variables and 186,515 nonzeros. It is synthetic an
 
 Read [`docs/benchmark_methodology.md`](docs/benchmark_methodology.md) before interpreting timing ratios. Reports retain unsuccessful runs. A lower primal objective alone is not a win: feasibility, tolerances, gap, and model class matter.
 
+Opt-in research features include combined scaling, CPU Halpern/restarted/reflected Halpern LP methods, PID weighting, power estimates, LP feasibility polishing, reliability branching, binary cover/clique cuts, and feasibility-pump/RINS heuristics. The default remains PDHG with Ruiz scaling and most-fractional branching. See [research integration and validation](docs/research_features.md) for examples, supported combinations, source references and remaining work.
+
 The [Phase 2 measured comparison](docs/phase2_results.md) records 8/9 selected cases solved by both VANTAGE backends versus 9/9 by HiGHS, including the remaining e226 limit and ADLITTLE GPU regression. A separate 200,000-iteration experiment solves e226 on CPU/CUDA in all three repetitions; it does not replace the standard-budget result. The [Phase 1 snapshot](docs/validation.md) remains available as historical evidence.
 
 ## Limits and next phase

@@ -28,7 +28,12 @@ def execute(command, timeout):
     except OSError as e:return dict(status='UNAVAILABLE',message=str(e)),'',str(e),None,time.perf_counter()-tick
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('models',nargs='+');p.add_argument('--binary',default=str(ROOT/'build/vantage'));p.add_argument('--solvers',default='cpu,cuda,highs');p.add_argument('--runs',type=int,default=3);p.add_argument('--iterations',type=int,default=100000);p.add_argument('--time-limit',type=float,default=10);p.add_argument('--threads',type=int,default=1);p.add_argument('--tol',type=float,default=1e-6);p.add_argument('--output',default='results/latest');p.add_argument('--no-scaling',action='store_true');p.add_argument('--no-restart',action='store_true');p.add_argument('--no-adaptive',action='store_true')
+    p=argparse.ArgumentParser();p.add_argument('models',nargs='+');p.add_argument('--binary',default=str(ROOT/'build/vantage'));p.add_argument('--solvers',default='cpu,cuda,highs');p.add_argument('--runs',type=int,default=3);p.add_argument('--iterations',type=int,default=100000);p.add_argument('--time-limit',type=float,default=10);p.add_argument('--threads',type=int,default=1);p.add_argument('--tol',type=float,default=1e-6);p.add_argument('--output',default='results/latest');p.add_argument('--method',choices=['pdhg','halpern','rhpdhg','r2hpdhg'],default='pdhg');p.add_argument('--scaling',choices=['ruiz','combined'],default='ruiz');p.add_argument('--branching',choices=['fractional','reliability'],default='fractional');p.add_argument('--no-scaling',action='store_true');p.add_argument('--no-restart',action='store_true');p.add_argument('--no-adaptive',action='store_true')
+    p.add_argument('--primal-weight',choices=['displacement','pid'],default='displacement')
+    p.add_argument('--power-iterations',type=int,default=0)
+    p.add_argument('--polishing',action='store_true')
+    p.add_argument('--cuts',action='store_true')
+    p.add_argument('--primal-heuristic',choices=['repair','pump','rins','all'],default='repair')
     a=p.parse_args()
     if a.runs<1:p.error('--runs must be positive')
     if a.iterations<1:p.error('--iterations must be positive')
@@ -63,6 +68,14 @@ def main():
                 name=f'{tag}_{solver}_{"warmup" if run<0 else run}'
                 if solver in ('cpu','cuda'):
                     command=[a.binary,'solve',str(path),'--device',solver,'--time-limit',str(a.time_limit),'--threads',str(a.threads),'--tol',str(a.tol),'--iterations',str(a.iterations)]
+                    if a.method!='pdhg':command+=['--method',a.method]
+                    if a.scaling!='ruiz':command+=['--scaling',a.scaling]
+                    if a.branching!='fractional':command+=['--branching',a.branching]
+                    if a.primal_weight!='displacement':command+=['--primal-weight',a.primal_weight]
+                    if a.power_iterations:command+=['--power-iterations',str(a.power_iterations)]
+                    if a.polishing:command+=['--polishing']
+                    if a.cuts:command+=['--cuts']
+                    if a.primal_heuristic!='repair':command+=['--primal-heuristic',a.primal_heuristic]
                     if a.no_scaling:command+=['--scaling-passes','0']
                     if a.no_restart:command+=['--no-restart']
                     if a.no_adaptive:command+=['--no-adaptive']
@@ -96,5 +109,6 @@ def main():
         summary.append(dict(instance=instance,solver=solver,optimal_runs=sum(r['status']=='OPTIMAL' for r in group),total_runs=len(group),statuses=[r['status'] for r in group],median_end_to_end_seconds=statistics.median(vals) if vals else None))
     (out/'summary.json').write_text(json.dumps(summary,indent=2))
     subprocess.run([sys.executable,str(ROOT/'benchmark/report.py'),str(out)],check=True)
+    subprocess.run([sys.executable,str(ROOT/'benchmark/profiles.py'),str(out/'runs.csv')],check=True)
 
 if __name__=='__main__':main()

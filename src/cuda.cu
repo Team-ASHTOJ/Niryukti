@@ -107,7 +107,7 @@ __global__ void primal_trial(int64_t n, const double *x, double *trial, double *
         double tau = base_tau * state[0];
         double v = fmin(u[j], fmax(l[j], (x[j] - tau * (c[j] + aty[j])) / (1 + tau * q[j])));
         trial[j] = v;
-        xb[j] = 2 * v - x[j];
+        xb[j] = v - x[j]; // A*dx is more stable than (A*xbar - A*x)/2.
         square = (v - x[j]) * (v - x[j]);
         if (!isfinite(v))
             square = INFINITY;
@@ -116,7 +116,7 @@ __global__ void primal_trial(int64_t n, const double *x, double *trial, double *
     if (!threadIdx.x)
         partial[blockIdx.x] = sum;
 }
-__global__ void dual_trial(int64_t n, const double *y, double *trial, const double *bar,
+__global__ void dual_trial(int64_t n, const double *y, double *trial, const double *delta,
                            const double *previous_ax, const double *l, const double *u,
                            double base_sigma, const double *state, double *partial,
                            double *couplings) {
@@ -124,13 +124,14 @@ __global__ void dual_trial(int64_t n, const double *y, double *trial, const doub
     double square = 0, coupling = 0;
     if (i < n) {
         double sigma = base_sigma * state[0];
-        double z = y[i] + sigma * bar[i];
+        double bar = previous_ax[i] + 2 * delta[i];
+        double z = y[i] + sigma * bar;
         double v = fmax(0., z - sigma * u[i]) + fmin(0., z - sigma * l[i]);
         trial[i] = v;
         double dy = v - y[i];
         square = dy * dy;
-        coupling = dy * (bar[i] - previous_ax[i]) * .5;
-        if (!isfinite(v) || !isfinite(bar[i]))
+        coupling = dy * delta[i];
+        if (!isfinite(v) || !isfinite(bar) || !isfinite(delta[i]))
             square = INFINITY;
     }
     double s = block_sum(square), c = block_sum(coupling);
@@ -182,12 +183,12 @@ __global__ void commit_primal(int64_t n, double *x, const double *trial, double 
     }
 }
 __global__ void commit_dual(int64_t n, double *y, const double *trial, double *avg,
-                            double *previous_ax, const double *bar, const double *state) {
+                            double *previous_ax, const double *delta, const double *state) {
     auto i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
     if (i < n && state[4]) {
         y[i] = trial[i];
         avg[i] += (y[i] - avg[i]) * state[5];
-        previous_ax[i] = .5 * (previous_ax[i] + bar[i]);
+        previous_ax[i] += delta[i];
     }
 }
 class CudaBackend final : public IterationBackend {
@@ -248,7 +249,7 @@ class CudaBackend final : public IterationBackend {
                 sparse_check(cusparseSpMV(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE, &one, a.d,
                                           vx.d, &zero, vax.d, CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG2,
                                           workspace->p),
-                             "SpMV A*xbar");
+                             "SpMV A*dx");
             if (y.n)
                 dual_trial<<<dy.n, 256>>>(y.n, y.p, trial_y.p, ax.p, previous_ax.p, rl.p, ru.p,
                                           sigma, state.p, dy.p, cross.p);

@@ -1,23 +1,37 @@
 #include "internal.hpp"
-#include <iostream>
 #include <stdexcept>
 namespace vantage {
 class CpuBackend final : public IterationBackend {
     const Model &m;
     Sparse at;
-    std::vector<double> x, y, xbar, xa, ya, gradient, trial_x, trial_y, ax, next_ax;
-    bool adaptive;
+    std::vector<double> x, y, delta_x, xa, ya, gradient, trial_x, trial_y, ax, next_ax;
+    bool adaptive, halpern;
+    std::vector<double> anchor_x, anchor_y, anchor_ax;
+    int64_t epoch_steps = 0;
+    double reflection;
+    bool fixed_point_restarts, request_restart = false;
+    double initial_residual = inf, previous_residual = inf;
     double factor = 1, average_mass = 0;
     int64_t accepted = 0, rejected = 0;
 
   public:
     CpuBackend(const Model &model, const std::vector<double> &px, const std::vector<double> &py,
-               bool adapt)
-        : m(model), at(m.A.transpose()), x(px), y(py), xbar(px), xa(px.size()), ya(py.size()),
+               bool adapt, bool anchored, double reflect, bool residual_restarts)
+        : m(model), at(m.A.transpose()), x(px), y(py), delta_x(px), xa(px.size()), ya(py.size()),
           gradient(px.size()), trial_x(px.size()), trial_y(py.size()), ax(m.A.multiply(px)),
-          next_ax(py.size()), adaptive(adapt) {}
+          next_ax(py.size()), adaptive(adapt), halpern(anchored), reflection(reflect),
+          fixed_point_restarts(residual_restarts) {
+        if (halpern) {
+            anchor_x = x;
+            anchor_y = y;
+            anchor_ax = ax;
+        }
+    }
     int64_t rejected_steps() const override {
         return rejected;
+    }
+    bool restart_requested() const override {
+        return request_restart;
     }
     int advance(int count, double primal_step, double dual_step) override {
         for (int it = 0; it < count; it++) {
@@ -42,28 +56,31 @@ class CpuBackend final : public IterationBackend {
                                             m.lb[j], m.ub[j]);
                     double dx = trial_x[j] - x[j];
                     dx2 += dx * dx;
-                    xbar[j] = 2 * trial_x[j] - x[j];
+                    delta_x[j] = dx; // Multiply the displacement, avoiding cancellation in A*dx.
                 }
 #ifdef _OPENMP
 #pragma omp parallel for reduction(+ : dy2, coupling) if (m.A.rows > 10000)
 #endif
                 for (int64_t i = 0; i < m.A.rows; i++) {
-                    double bar = 0;
+                    double delta = 0;
                     for (auto k = m.A.ptr[i]; k < m.A.ptr[i + 1]; k++)
-                        bar += m.A.value[k] * xbar[m.A.index[k]];
+                        delta += m.A.value[k] * delta_x[m.A.index[k]];
+                    double bar = ax[i] + 2 * delta;
                     double z = y[i] + sigma * bar;
                     trial_y[i] =
                         std::max(0., z - sigma * m.ru[i]) + std::min(0., z - sigma * m.rl[i]);
                     double dy = trial_y[i] - y[i];
                     dy2 += dy * dy;
-                    coupling += dy * (bar - ax[i]) * .5;
-                    next_ax[i] = (bar + ax[i]) * .5;
+                    if (!std::isfinite(bar) || !std::isfinite(trial_y[i]))
+                        dy2 = inf;
+                    coupling += dy * delta;
+                    next_ax[i] = ax[i] + delta;
                 }
                 double energy = dx2 / tau + dy2 / sigma;
                 double limit = std::abs(coupling) > 0 ? energy / (2 * std::abs(coupling)) : inf;
                 bool finite = std::isfinite(energy) && std::isfinite(coupling);
                 double used_factor = factor;
-                bool accept = finite && (!adaptive || limit >= 0.5);
+                bool accept = finite && (!adaptive || limit >= 1);
                 if (adaptive) {
                     double k = double(accepted + 2);
                     double multiplier =
@@ -73,17 +90,6 @@ class CpuBackend final : public IterationBackend {
                     factor = std::clamp(factor * multiplier, 1e-12, 1e12);
                 }
                 if (!accept) {
-                    if (attempt < 5) {
-                        std::cerr << "PDHG reject: attempt=" << attempt
-                                  << " factor=" << factor
-                                  << " tau=" << tau
-                                  << " sigma=" << sigma
-                                  << " energy=" << energy
-                                  << " coupling=" << coupling
-                                  << " limit=" << limit
-                                  << " finite=" << finite
-                                  << "\\n";
-                    }
                     rejected++;
                     if (!adaptive)
                         throw std::runtime_error("Nonfinite PDHG step");
@@ -93,6 +99,35 @@ class CpuBackend final : public IterationBackend {
                 y.swap(trial_y);
                 ax.swap(next_ax);
                 accepted++;
+                if (halpern) {
+                    // Preserve T(z) as the second stopping/restart candidate.
+                    xa = x;
+                    ya = y;
+                    double lambda = 1 / (double(epoch_steps) + 2);
+                    for (size_t j = 0; j < x.size(); j++)
+                        x[j] = lambda * anchor_x[j] +
+                               (1 - lambda) * ((1 + reflection) * x[j] - reflection * trial_x[j]);
+                    for (size_t i = 0; i < y.size(); i++) {
+                        y[i] = lambda * anchor_y[i] +
+                               (1 - lambda) * ((1 + reflection) * y[i] - reflection * trial_y[i]);
+                        ax[i] = lambda * anchor_ax[i] +
+                                (1 - lambda) * ((1 + reflection) * ax[i] - reflection * next_ax[i]);
+                    }
+                    double residual = std::sqrt(std::max(0., energy - 2 * coupling));
+                    if (epoch_steps == 0)
+                        initial_residual = residual;
+                    epoch_steps++;
+                    request_restart =
+                        fixed_point_restarts && epoch_steps >= 10 &&
+                        (residual <= .2 * initial_residual ||
+                         (residual <= .8 * initial_residual && residual > previous_residual) ||
+                         epoch_steps >= std::max<int64_t>(10, accepted / 2));
+                    previous_residual = residual;
+                    if (request_restart)
+                        return it + 1;
+                    success = true;
+                    break;
+                }
                 average_mass += used_factor;
                 double w = used_factor / average_mass;
 #ifdef _OPENMP
@@ -119,18 +154,35 @@ class CpuBackend final : public IterationBackend {
         cy = y;
         avgx = xa;
         avgy = ya;
+        // Rebase the activity recurrence at monitoring checkpoints without resetting averages.
+        ax = m.A.multiply(x);
     }
     void reset(const std::vector<double> &px, const std::vector<double> &py) override {
         x = px;
         y = py;
         ax = m.A.multiply(x);
+        if (halpern) {
+            anchor_x = x;
+            anchor_y = y;
+            anchor_ax = ax;
+            epoch_steps = 0;
+            initial_residual = previous_residual = inf;
+            request_restart = false;
+        }
         average_mass = 0;
         std::fill(xa.begin(), xa.end(), 0);
         std::fill(ya.begin(), ya.end(), 0);
     }
 };
 std::unique_ptr<IterationBackend> cpu_backend(const Model &m, const std::vector<double> &x,
-                                              const std::vector<double> &y, bool adaptive) {
-    return std::make_unique<CpuBackend>(m, x, y, adaptive);
+                                              const std::vector<double> &y, bool adaptive,
+                                              bool halpern, double reflection,
+                                              bool fixed_point_restarts) {
+    if (halpern && adaptive)
+        throw std::runtime_error("Halpern requires a fixed PDHG operator");
+    if (!std::isfinite(reflection) || reflection < 0 || reflection > 1)
+        throw std::runtime_error("Invalid Halpern reflection");
+    return std::make_unique<CpuBackend>(m, x, y, adaptive, halpern, reflection,
+                                        fixed_point_restarts);
 }
 } // namespace vantage

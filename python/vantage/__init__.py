@@ -14,9 +14,20 @@ def _binary(binary=None):
 
 
 def solve(path, *, device='auto', tol=1e-6, time_limit=60, threads=1, warm_start=None,
-          allow_model_change=False, binary=None, iterations=100000):
+          allow_model_change=False, binary=None, iterations=100000, method='pdhg',
+          scaling='ruiz', adaptive=True, branching='fractional', primal_weight='displacement',
+          power_iterations=0, polishing=False, cuts=False, primal_heuristic="repair"):
     command=[_binary(binary),'solve',str(path),'--device',device,'--tol',str(tol),
              '--time-limit',str(time_limit),'--threads',str(threads),'--iterations',str(iterations)]
+    if method!='pdhg':command+=['--method',method]
+    if scaling!='ruiz':command+=['--scaling',scaling]
+    if branching!='fractional':command+=['--branching',branching]
+    if primal_weight!='displacement':command+=['--primal-weight',primal_weight]
+    if power_iterations:command+=['--power-iterations',str(power_iterations)]
+    if polishing:command+=['--polishing']
+    if cuts:command+=['--cuts']
+    if primal_heuristic!='repair':command+=['--primal-heuristic',primal_heuristic]
+    if not adaptive:command+=['--no-adaptive']
     with tempfile.TemporaryDirectory(prefix='vantage-api-') as temp:
         if warm_start is not None:
             if isinstance(warm_start,dict):

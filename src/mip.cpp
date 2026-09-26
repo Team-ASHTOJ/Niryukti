@@ -1,11 +1,31 @@
 #include "internal.hpp"
 #include <queue>
+#include <set>
+#include <utility>
 namespace vantage {
 namespace {
 struct Node {
     std::vector<double> lb, ub, x, y;
     double bound = -inf;
     int depth = 0;
+    int64_t branch_variable = -1;
+    bool branch_up = false;
+    double branch_distance = 0, parent_objective = inf;
+};
+struct Pseudocost {
+    double mean = 0;
+    int64_t count = 0;
+    void observe(double parent, double child, double distance) {
+        if (!std::isfinite(parent) || !std::isfinite(child) || distance <= 0)
+            return;
+        double value = std::max(0., child - parent) / distance;
+        if (!std::isfinite(value))
+            return;
+        mean += (value - mean) / double(++count);
+    }
+    double predict(double distance, double fallback) const {
+        return distance * (count ? mean : fallback);
+    }
 };
 // Conservative interval arithmetic for implied INTEGER bounds only. Row bounds stay
 // unchanged, so continuous dual postsolve does not need new multiplier mappings.
@@ -98,12 +118,16 @@ Result solve_mip(const Model &original, const Options &options) {
     Result out;
     out.status = "NODE_LIMIT";
     Model relaxation = original;
+    if (options.cuts)
+        out.cuts_added = add_binary_cuts(relaxation, 64);
     std::fill(relaxation.types.begin(), relaxation.types.end(), VarType::Continuous);
     Node root;
     root.lb = original.lb;
     root.ub = original.ub;
     root.x = options.initial_x;
     root.y = options.initial_y;
+    if (!root.y.empty())
+        root.y.resize(relaxation.rl.size(), 0);
     for (size_t j = 0; j < original.c.size(); j++)
         if (original.types[j] != VarType::Continuous) {
             root.lb[j] = std::ceil(root.lb[j]);
@@ -119,22 +143,39 @@ Result solve_mip(const Model &original, const Options &options) {
     queue.push(root);
     double incumbent = inf, closed = inf, unresolved = inf;
     int64_t unresolved_count = 0;
+    size_t cost_count = options.branching == "reliability" ? original.c.size() : 0;
+    std::vector<Pseudocost> down(cost_count), up(cost_count);
     auto install = [&](std::vector<double> x, const std::vector<double> &y) {
         for (size_t j = 0; j < x.size(); j++)
             if (original.types[j] != VarType::Continuous)
                 x[j] = std::round(x[j]);
-        auto a = verify(original, x, y);
+        // Cut multipliers belong to the integer relaxation, not original rows.
+        auto original_y = y;
+        original_y.resize(original.rl.size(), 0);
+        auto a = verify(original, x, original_y);
         if (a.finite && a.primal <= options.tol && a.integrality <= options.integer_tol &&
             a.objective < incumbent) {
             incumbent = a.objective;
             out.x = std::move(x);
-            out.y = y;
+            out.y = std::move(original_y);
             out.accuracy = a;
         }
     };
     auto cutoff = [&](double bound) {
         return std::isfinite(incumbent) &&
                bound >= incumbent - options.mip_gap * std::max(1., std::abs(incumbent));
+    };
+    auto account_heuristic = [&](const Result &h) {
+        out.iterations += h.iterations;
+        out.restarts += h.restarts;
+        out.rejected_steps += h.rejected_steps;
+        out.weight_updates += h.weight_updates;
+        out.polishing_iterations += h.polishing_iterations;
+        out.polishing_attempts += h.polishing_attempts;
+        out.preprocess_seconds += h.preprocess_seconds;
+        out.transfer_seconds += h.transfer_seconds;
+        out.iteration_seconds += h.iteration_seconds;
+        out.verification_seconds += h.verification_seconds;
     };
     while (!queue.empty() && out.nodes < options.node_limit) {
         if (interrupted) {
@@ -167,12 +208,20 @@ Result solve_mip(const Model &original, const Options &options) {
         out.iterations += r.iterations;
         out.restarts += r.restarts;
         out.rejected_steps += r.rejected_steps;
+        out.weight_updates += r.weight_updates;
+        out.polishing_iterations += r.polishing_iterations;
+        out.polishing_attempts += r.polishing_attempts;
         out.iteration_seconds += r.iteration_seconds;
         out.transfer_seconds += r.transfer_seconds;
         out.preprocess_seconds += r.preprocess_seconds;
         out.verification_seconds += r.verification_seconds;
         out.backend = r.backend;
         out.device_name = r.device_name;
+        if (options.branching == "reliability" && node.branch_variable >= 0 &&
+            r.status == "OPTIMAL") {
+            auto &cost = node.branch_up ? up[node.branch_variable] : down[node.branch_variable];
+            cost.observe(node.parent_objective, r.accuracy.objective, node.branch_distance);
+        }
         if (r.status == "INFEASIBLE")
             continue;
         double lower = std::max(node.bound, r.accuracy.lower_bound);
@@ -202,12 +251,103 @@ Result solve_mip(const Model &original, const Options &options) {
             out.iterations += rr.iterations;
             out.restarts += rr.restarts;
             out.rejected_steps += rr.rejected_steps;
+            out.weight_updates += rr.weight_updates;
+            out.polishing_iterations += rr.polishing_iterations;
+            out.polishing_attempts += rr.polishing_attempts;
             out.iteration_seconds += rr.iteration_seconds;
             out.verification_seconds += rr.verification_seconds;
             out.preprocess_seconds += rr.preprocess_seconds;
             out.transfer_seconds += rr.transfer_seconds;
             if (rr.x.size() == original.c.size())
                 install(rr.x, rr.y);
+        }
+        if (out.nodes == 1 && !std::isfinite(incumbent) &&
+            (options.primal_heuristic == "pump" || options.primal_heuristic == "all")) {
+            auto point = r.x;
+            std::set<std::vector<double>> visited;
+            for (int round = 0; round < 8 && !interrupted && elapsed(start) < options.time_limit;
+                 ++round) {
+                auto target = point;
+                std::vector<double> key;
+                for (size_t j = 0; j < target.size(); ++j)
+                    if (original.types[j] != VarType::Continuous) {
+                        target[j] = std::clamp(std::round(target[j]), node.lb[j], node.ub[j]);
+                        key.push_back(target[j]);
+                    }
+                if (!visited.insert(key).second) {
+                    bool changed = false;
+                    for (size_t t = 0; t < target.size(); ++t) {
+                        size_t j = (t + size_t(round)) % target.size();
+                        if (original.types[j] == VarType::Continuous)
+                            continue;
+                        if (target[j] + 1 <= node.ub[j] && target[j] + 1 != target[j]) {
+                            target[j] += 1;
+                            changed = true;
+                            break;
+                        }
+                        if (target[j] - 1 >= node.lb[j] && target[j] - 1 != target[j]) {
+                            target[j] -= 1;
+                            changed = true;
+                            break;
+                        }
+                    }
+                    if (!changed)
+                        break;
+                }
+                Model source = relaxation;
+                source.types = original.types;
+                auto projection = distance_projection_model(source, target);
+                Options po = o;
+                po.initial_x = point;
+                for (size_t j = 0; j < point.size(); ++j)
+                    if (original.types[j] != VarType::Continuous)
+                        po.initial_x.push_back(std::abs(point[j] - target[j]));
+                po.initial_y.assign(projection.rl.size(), 0);
+                po.polishing = false;
+                po.iteration_limit = std::min<int64_t>(o.iteration_limit, 2000);
+                po.time_limit = std::max(0., options.time_limit - elapsed(start));
+                auto projected = solve_continuous(projection, po);
+                account_heuristic(projected);
+                out.pump_rounds++;
+                if (!projected.accuracy.finite || projected.x.size() < original.c.size())
+                    break;
+                point.assign(projected.x.begin(), projected.x.begin() + original.c.size());
+                install(point, std::vector<double>(original.rl.size(), 0));
+                if (std::isfinite(incumbent))
+                    break;
+            }
+        }
+        if (std::isfinite(incumbent) && (out.nodes == 1 || out.nodes % 10 == 0) &&
+            (options.primal_heuristic == "rins" || options.primal_heuristic == "all") &&
+            out.nodes < options.node_limit && !interrupted && elapsed(start) < options.time_limit) {
+            Model neighborhood = relaxation;
+            neighborhood.types = original.types;
+            size_t fixed = 0;
+            for (size_t j = 0; j < original.c.size(); ++j)
+                if (original.types[j] != VarType::Continuous && node.lb[j] < node.ub[j] &&
+                    std::abs(r.x[j] - out.x[j]) <= options.integer_tol && out.x[j] >= node.lb[j] &&
+                    out.x[j] <= node.ub[j]) {
+                    neighborhood.lb[j] = neighborhood.ub[j] = out.x[j];
+                    fixed++;
+                }
+            if (fixed) {
+                Options no = o;
+                no.primal_heuristic = "repair";
+                no.cuts = false;
+                no.initial_x = r.x;
+                no.initial_y = r.y;
+                no.node_limit = std::min<int64_t>(20, options.node_limit - out.nodes);
+                no.time_limit = std::max(0., options.time_limit - elapsed(start));
+                auto nr = solve_mip(neighborhood, no);
+                account_heuristic(nr);
+                out.rins_calls++;
+                out.nodes += nr.nodes;
+                out.heuristic_nodes += nr.nodes;
+                if (nr.x.size() == original.c.size())
+                    install(nr.x, nr.y);
+                // Neighborhood bounds concern only its restricted feasible set.
+                // They never enter the global tree's lower bound or cutoff logic.
+            }
         }
         if (cutoff(lower)) {
             closed = std::min(closed, lower);
@@ -230,12 +370,77 @@ Result solve_mip(const Model &original, const Options &options) {
             unresolved_count++;
             continue;
         }
+        if (options.branching == "reliability") {
+            std::vector<std::pair<double, size_t>> candidates;
+            for (size_t j = 0; j < r.x.size(); j++)
+                if (original.types[j] != VarType::Continuous && node.lb[j] < node.ub[j]) {
+                    double v = std::clamp(r.x[j], node.lb[j], node.ub[j]);
+                    double f = std::abs(v - std::round(v));
+                    if (f > options.integer_tol)
+                        candidates.emplace_back(-f, j);
+                }
+            std::sort(candidates.begin(), candidates.end());
+            double best_score = -1;
+            for (size_t rank = 0; rank < candidates.size(); rank++) {
+                auto j = candidates[rank].second;
+                double v = std::clamp(r.x[j], node.lb[j], node.ub[j]);
+                double distance[2] = {v - std::floor(v), std::ceil(v) - v};
+                // Probe only a bounded shortlist. Limited/failed probes are never proofs
+                // and never contribute observations to the reliability count.
+                if (rank < 4 && r.status == "OPTIMAL")
+                    for (int direction = 0; direction < 2; direction++) {
+                        auto &cost = direction ? up[j] : down[j];
+                        if (cost.count >= 2 || interrupted || elapsed(start) >= options.time_limit)
+                            continue;
+                        Model probe = relaxation;
+                        if (direction)
+                            probe.lb[j] = std::ceil(v);
+                        else
+                            probe.ub[j] = std::floor(v);
+                        Options po = o;
+                        po.initial_x = r.x;
+                        po.initial_y = r.y;
+                        po.iteration_limit = std::min<int64_t>(o.iteration_limit, 1000);
+                        po.time_limit = std::max(0., options.time_limit - elapsed(start));
+                        auto pr = solve_continuous(probe, po);
+                        out.strong_branch_probes++;
+                        out.iterations += pr.iterations;
+                        out.restarts += pr.restarts;
+                        out.rejected_steps += pr.rejected_steps;
+                        out.weight_updates += pr.weight_updates;
+                        out.polishing_iterations += pr.polishing_iterations;
+                        out.polishing_attempts += pr.polishing_attempts;
+                        out.preprocess_seconds += pr.preprocess_seconds;
+                        out.iteration_seconds += pr.iteration_seconds;
+                        out.transfer_seconds += pr.transfer_seconds;
+                        out.verification_seconds += pr.verification_seconds;
+                        if (pr.status == "OPTIMAL")
+                            cost.observe(r.accuracy.objective, pr.accuracy.objective,
+                                         distance[direction]);
+                    }
+                double fallback = std::max(1., std::abs(original.c[j]));
+                double d = down[j].predict(distance[0], fallback);
+                double u = up[j].predict(distance[1], fallback);
+                double score = .9 * std::min(d, u) + .1 * std::max(d, u);
+                if (score > best_score) {
+                    best_score = score;
+                    branch = j;
+                }
+            }
+        }
         double value = std::clamp(r.x[branch], node.lb[branch], node.ub[branch]);
         Node left = node, right = node;
         left.bound = right.bound = lower;
         left.depth = right.depth = node.depth + 1;
         left.x = right.x = r.x;
         left.y = right.y = r.y;
+        left.branch_variable = right.branch_variable = branch;
+        left.branch_up = false;
+        right.branch_up = true;
+        left.branch_distance = value - std::floor(value);
+        right.branch_distance = std::ceil(value) - value;
+        left.parent_objective = right.parent_objective =
+            r.status == "OPTIMAL" ? r.accuracy.objective : inf;
         left.ub[branch] = std::floor(value);
         right.lb[branch] = std::ceil(value);
         if (left.lb[branch] <= left.ub[branch])

@@ -5,6 +5,11 @@
 #include <omp.h>
 #endif
 namespace vantage {
+namespace {
+bool anchored_method(const Options &o) {
+    return o.method == "halpern" || o.method == "rhpdhg" || o.method == "r2hpdhg";
+}
+} // namespace
 volatile std::sig_atomic_t interrupted = 0;
 Result solve(const Model &m, const Options &o) {
     auto overall_start = Clock::now();
@@ -12,10 +17,27 @@ Result solve(const Model &m, const Options &o) {
     if (!(o.tol > 0 && o.tol < 1) || !std::isfinite(o.tol) || o.iteration_limit < 0 ||
         o.node_limit < 0 || o.time_limit < 0 || std::isnan(o.time_limit) || o.check_every < 1 ||
         o.scaling_passes < 0 || o.scaling_passes > 20 || o.threads < 1 || o.mip_gap < 0 ||
-        !std::isfinite(o.mip_gap) || o.integer_tol <= 0 || o.integer_tol >= .5)
+        !std::isfinite(o.mip_gap) || !std::isfinite(o.integer_tol) || o.integer_tol <= 0 ||
+        o.integer_tol >= .5 || o.power_iterations < 0 || o.power_iterations > 1000)
         throw std::runtime_error("Invalid solver options");
     if (o.device != "auto" && o.device != "cpu" && o.device != "cuda")
         throw std::runtime_error("Unknown device");
+    if (o.method != "pdhg" && !anchored_method(o))
+        throw std::runtime_error("Unknown method: use pdhg, halpern, rhpdhg or r2hpdhg");
+    if (o.primal_weight != "displacement" && o.primal_weight != "pid")
+        throw std::runtime_error("Unknown primal weight controller");
+    if (o.primal_heuristic != "repair" && o.primal_heuristic != "pump" &&
+        o.primal_heuristic != "rins" && o.primal_heuristic != "all")
+        throw std::runtime_error("Unknown primal heuristic");
+    if (o.polishing && m.is_qp())
+        throw std::runtime_error("Feasibility polishing currently requires LP relaxations");
+    if (o.scaling != "ruiz" && o.scaling != "combined")
+        throw std::runtime_error("Unknown scaling: use ruiz or combined");
+    if (o.branching != "fractional" && o.branching != "reliability")
+        throw std::runtime_error("Unknown branching: use fractional or reliability");
+    if (anchored_method(o) && (o.adaptive || o.device == "cuda" || m.is_qp() || m.is_mip()))
+        throw std::runtime_error(
+            "Experimental Halpern supports continuous LP on CPU with --no-adaptive");
     if (!o.initial_x.empty() && o.initial_x.size() != m.c.size())
         throw std::runtime_error("Warm-start primal dimension mismatch");
     if (!o.initial_y.empty() && o.initial_y.size() != m.rl.size())
@@ -52,6 +74,10 @@ Result solve(const Model &m, const Options &o) {
     return result;
 }
 Result solve_continuous(const Model &original, const Options &o) {
+    if (anchored_method(o) &&
+        (o.adaptive || o.device == "cuda" || original.is_qp() || original.is_mip()))
+        throw std::runtime_error(
+            "Experimental Halpern supports continuous LP on CPU with --no-adaptive");
     auto start = Clock::now();
     Result r;
     Verifier verifier(original);
@@ -119,8 +145,15 @@ Result solve_continuous(const Model &original, const Options &o) {
     for (auto s : colsum)
         colmax = std::max(colmax, s);
     double norm = std::sqrt(rowmax) * std::sqrt(colmax);
+    if (o.power_iterations > 0) {
+        r.operator_norm_estimate = power_norm(m.A, o.power_iterations);
+        // A power estimate is not an upper bound. Only the backtracking path may
+        // use it for larger initial steps; fixed-operator methods retain the bound.
+        if (o.adaptive && r.operator_norm_estimate > 0)
+            norm = std::min(norm, 1.05 * r.operator_norm_estimate);
+    }
     double step = norm > 0 ? .9 / norm : 1, weight = 1;
-    if (o.adaptive) {
+    if ((o.adaptive || anchored_method(o)) && o.primal_weight != "pid") {
         long double c2 = 0, b2 = 0;
         for (auto c : m.c)
             c2 += (long double)c * c;
@@ -131,16 +164,22 @@ Result solve_continuous(const Model &original, const Options &o) {
         if (c2 > 1e-24 && b2 > 1e-24)
             weight = std::clamp(std::sqrt(double(c2 / b2)), 1e-4, 1e4);
     }
-    bool usecuda = o.device == "cuda" ||
-                   (o.device == "auto" && cuda_available() && m.A.value.size() >= 100000);
+    bool usecuda = o.device == "cuda" || (o.method == "pdhg" && o.device == "auto" &&
+                                          cuda_available() && m.A.value.size() >= 100000);
     r.backend = usecuda ? "cuda" : "cpu";
     r.device_name = usecuda ? cuda_description() : "CPU";
     auto transfer = Clock::now();
-    auto backend = usecuda ? cuda_backend(m, x, y, o.adaptive) : cpu_backend(m, x, y, o.adaptive);
+    bool residual_restarts = o.method == "rhpdhg" || o.method == "r2hpdhg";
+    auto backend = usecuda
+                       ? cuda_backend(m, x, y, o.adaptive)
+                       : cpu_backend(m, x, y, o.adaptive, anchored_method(o),
+                                     o.method == "r2hpdhg" ? 1 : 0, residual_restarts && o.restart);
     r.transfer_seconds = elapsed(transfer);
     double restart_kkt = r.accuracy.kkt;
     int64_t since_restart = 0;
     std::vector<double> epochx = x, epochy = y;
+    PrimalWeightController controller;
+    int64_t next_polish = 100, previous_rejected = 0;
     while (r.iterations < o.iteration_limit) {
         if (interrupted) {
             r.status = "INTERRUPTED";
@@ -156,10 +195,17 @@ Result solve_continuous(const Model &original, const Options &o) {
         r.iteration_seconds += elapsed(tick);
         r.iterations += accepted;
         since_restart += accepted;
-        r.rejected_steps = backend->rejected_steps();
+        auto rejected = backend->rejected_steps();
+        r.rejected_steps += rejected - previous_rejected;
+        previous_rejected = rejected;
         tick = Clock::now();
         std::vector<double> cx, cy, ax, ay;
         backend->candidates(cx, cy, ax, ay);
+        std::vector<double> restart_x, restart_y;
+        if (residual_restarts && backend->restart_requested()) {
+            restart_x = ax;
+            restart_y = ay;
+        }
         auto ox = prep.restore_x(cx), oy = prep.restore_y(cy, original.rl.size());
         auto ca = verifier.evaluate(ox, oy, false);
         auto aox = prep.restore_x(ax), aoy = prep.restore_y(ay, original.rl.size());
@@ -199,11 +245,25 @@ Result solve_continuous(const Model &original, const Options &o) {
         // A positive lower bound for the zero-objective feasibility problem is a
         // contradiction: every feasible point has objective zero. Verify in original units.
         if (r.iterations >= 1000 && ca.primal > o.tol) {
-            auto ray = oy;
-            double norm_y = 0;
-            for (double v : ray)
-                norm_y = std::max(norm_y, std::abs(v));
-            if (norm_y > 0) {
+            // Candidate rays from iterates and epoch displacement. These are
+            // heuristic extractions under adaptive/restarted iterations; only
+            // the outward-rounded original-model bound certifies infeasibility.
+            auto displacement = cy;
+            for (size_t i = 0; i < displacement.size(); ++i)
+                displacement[i] -= epochy[i];
+            std::vector<std::vector<double>> rays;
+            rays.push_back(oy);
+            rays.push_back(aoy);
+            rays.push_back(prep.restore_y(displacement, original.rl.size()));
+            for (auto &ray : rays) {
+                double norm_y = 0;
+                bool finite = true;
+                for (double v : ray) {
+                    finite = finite && std::isfinite(v);
+                    norm_y = std::max(norm_y, std::abs(v));
+                }
+                if (!finite || !(norm_y > 0))
+                    continue;
                 for (double &v : ray)
                     v /= norm_y;
                 double margin = verifier.infeasibility_bound(ray);
@@ -215,19 +275,88 @@ Result solve_continuous(const Model &original, const Options &o) {
                     break;
                 }
             }
+            if (r.status == "INFEASIBLE")
+                break;
         }
-        if (o.restart && since_restart >= o.check_every * 2 &&
-            (ca.kkt < .5 * restart_kkt ||
-             since_restart >= std::max<int64_t>(2000, r.iterations / 2))) {
-            if (o.adaptive) {
+        if (o.polishing && !original.is_qp() && r.iterations >= next_polish) {
+            next_polish = r.iterations <= std::numeric_limits<int64_t>::max() / 2
+                              ? 2 * r.iterations
+                              : std::numeric_limits<int64_t>::max();
+            int64_t budget = std::min(r.iterations / 8, (o.iteration_limit - r.iterations) / 2);
+            if (ca.gap <= .01 && budget > 0 && !interrupted && elapsed(start) < o.time_limit) {
+                r.polishing_attempts++;
+                Model primal = original;
+                std::fill(primal.c.begin(), primal.c.end(), 0);
+                primal.offset = 0;
+                Options po = o;
+                po.method = "pdhg";
+                po.adaptive = true;
+                po.polishing = false;
+                po.initial_x = ox;
+                po.initial_y.assign(original.rl.size(), 0);
+                po.iteration_limit = budget;
+                po.time_limit = std::max(0., o.time_limit - elapsed(start));
+                auto accumulate = [&](const Result &aux) {
+                    r.iterations += aux.iterations;
+                    r.polishing_iterations += aux.iterations;
+                    r.restarts += aux.restarts;
+                    r.rejected_steps += aux.rejected_steps;
+                    r.weight_updates += aux.weight_updates;
+                    r.preprocess_seconds += aux.preprocess_seconds;
+                    r.transfer_seconds += aux.transfer_seconds;
+                    r.iteration_seconds += aux.iteration_seconds;
+                    r.verification_seconds += aux.verification_seconds;
+                };
+                auto pr = solve_continuous(primal, po);
+                accumulate(pr);
+                if (pr.accuracy.finite && pr.accuracy.primal <= o.tol && !interrupted &&
+                    elapsed(start) < o.time_limit) {
+                    auto dual = dual_feasibility_model(original);
+                    po.initial_x = oy;
+                    po.initial_y.assign(original.c.size(), 0);
+                    po.iteration_limit = std::min(budget, o.iteration_limit - r.iterations);
+                    po.time_limit = std::max(0., o.time_limit - elapsed(start));
+                    auto dr = solve_continuous(dual, po);
+                    accumulate(dr);
+                    if (dr.x.size() == original.rl.size()) {
+                        auto polished = verifier.evaluate(pr.x, dr.x);
+                        if (polished.finite && polished.kkt < r.accuracy.kkt) {
+                            r.x = std::move(pr.x);
+                            r.y = std::move(dr.x);
+                            r.accuracy = polished;
+                            if (polished.kkt <= o.tol) {
+                                r.status = "OPTIMAL";
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        bool restart_due = residual_restarts
+                               ? backend->restart_requested()
+                               : since_restart >= int64_t(o.check_every) * 2 &&
+                                     (ca.kkt < .5 * restart_kkt ||
+                                      since_restart >= std::max<int64_t>(2000, r.iterations / 2));
+        if (o.restart && restart_due) {
+            if (residual_restarts) {
+                cx = std::move(restart_x);
+                cy = std::move(restart_y);
+            }
+            if (o.adaptive || anchored_method(o) || o.primal_weight == "pid") {
                 long double dx = 0, dy = 0;
                 for (size_t j = 0; j < cx.size(); j++)
                     dx += (long double)(cx[j] - epochx[j]) * (cx[j] - epochx[j]);
                 for (size_t i = 0; i < cy.size(); i++)
                     dy += (long double)(cy[i] - epochy[i]) * (cy[i] - epochy[i]);
                 if (dx > 1e-24 && dy > 1e-24) {
-                    double target = std::clamp(std::sqrt(double(dy / dx)), 1e-4, 1e4);
-                    weight = std::sqrt(weight * target);
+                    if (o.primal_weight == "pid")
+                        weight = controller.update(weight, dx, dy);
+                    else {
+                        double target = std::clamp(std::sqrt(double(dy / dx)), 1e-4, 1e4);
+                        weight = std::sqrt(weight * target);
+                    }
+                    r.weight_updates++;
                 }
             }
             backend->reset(cx, cy);

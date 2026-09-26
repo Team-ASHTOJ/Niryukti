@@ -41,6 +41,13 @@ struct Options {
     int check_every = 100, scaling_passes = 5, threads = 1;
     bool presolve = true, restart = true, adaptive = true, verbose = false;
     std::vector<double> initial_x, initial_y;
+    // Experimental, opt-in features; existing PDHG/Ruiz defaults are retained.
+    std::string method = "pdhg", scaling = "ruiz", branching = "fractional";
+    std::string primal_weight = "displacement";
+    int power_iterations = 0;
+    bool polishing = false;
+    bool cuts = false;
+    std::string primal_heuristic = "repair";
 };
 struct Accuracy {
     double objective = inf, primal = inf, dual = inf, gap = inf, kkt = inf, integrality = inf;
@@ -70,6 +77,11 @@ struct Result {
     int64_t iterations = 0, restarts = 0, rejected_steps = 0, nodes = 0, nodes_remaining = 0,
             removed_columns = 0, removed_rows = 0, bounds_tightened = 0;
     double best_bound = -inf, mip_gap = inf;
+    int64_t strong_branch_probes = 0;
+    int64_t weight_updates = 0, polishing_iterations = 0, polishing_attempts = 0;
+    double operator_norm_estimate = 0;
+    int64_t cuts_added = 0;
+    int64_t pump_rounds = 0, rins_calls = 0, heuristic_nodes = 0;
 };
 Model read_model(const std::string &path);
 void write_model(const Model &, const std::string &path);

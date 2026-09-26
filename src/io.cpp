@@ -678,6 +678,10 @@ std::string result_json(const Model &m, const Result &r) {
           {"iteration_seconds", r.iteration_seconds},
           {"verification_seconds", r.verification_seconds},
           {"iterations", r.iterations},
+          {"weight_updates", r.weight_updates},
+          {"polishing_iterations", r.polishing_iterations},
+          {"polishing_attempts", r.polishing_attempts},
+          {"operator_norm_estimate", r.operator_norm_estimate},
           {"restarts", r.restarts},
           {"rejected_steps", r.rejected_steps}}},
         {"hardware", {{"backend", r.backend}, {"device", r.device_name}, {"precision", "FP64"}}},
@@ -691,6 +695,11 @@ std::string result_json(const Model &m, const Result &r) {
     if (m.is_mip())
         j["mip"] = {
             {"nodes", r.nodes},
+            {"strong_branch_probes", r.strong_branch_probes},
+            {"cuts_added", r.cuts_added},
+            {"pump_rounds", r.pump_rounds},
+            {"rins_calls", r.rins_calls},
+            {"heuristic_nodes", r.heuristic_nodes},
             {"bounds_tightened", r.bounds_tightened},
             {"nodes_remaining", r.nodes_remaining},
             {"best_bound", std::isfinite(r.best_bound) ? json(m.sense * r.best_bound) : json()},

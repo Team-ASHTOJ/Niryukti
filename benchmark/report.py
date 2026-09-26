@@ -24,7 +24,7 @@ body{background:#0c1322;color:#e2e8f0;font:15px system-ui;margin:32px}h1{letter-
 <h1>VANTAGE</h1><p>Independent sparse optimization · reproducible prototype measurements</p>
 <p>Every selected measured run appears below, including failures and limits. CUDA receives one discarded warmup process per instance. Timings include parsing and device setup/transfers; process wall time additionally includes process startup. Small instances can favor CPU solvers. Amber bars include runs that did not reach optimal status.</p>
 <p>LP/QP KKT values are independently recomputed in original units. For MILP, continuous KKT values do not certify tree optimality: inspect the raw incumbent, global bound, and MIP gap. Baseline tolerance conventions differ; objective and feasibility agreement must be read alongside timing.</p>
-<p><a href="runs.csv">All measured runs (CSV)</a> · <a href="summary.json">Median summaries</a> · <a href="manifest.json">Machine and configuration</a></p>
+<p><a href="profile.html">Performance profiles</a> · <a href="runs.csv">All measured runs (CSV)</a> · <a href="summary.json">Median summaries</a> · <a href="manifest.json">Machine and configuration</a></p>
 '''
 page+=f'<h2>Median end-to-end time</h2><svg role="img" aria-label="Per-instance median solver times" viewBox="0 0 900 {60+30*len(summary)}">{bars}</svg><h2>Per-instance results</h2><div class="scroll"><table><thead><tr>'+''.join(f'<th>{h}</th>' for h in ['Instance','Solver','Run','Status','Objective','Primal residual','KKT','End-to-end s','Process s'])+'</tr></thead><tbody>'+body+'</tbody></table></div></html>'
 (root/'index.html').write_text(page);print(root/'index.html')

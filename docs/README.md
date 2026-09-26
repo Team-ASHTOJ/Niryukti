@@ -12,6 +12,7 @@ Start here when preparing explanations, slides, submissions, or further research
 | [Phase 2 comparison](phase2_results.md) | Generated before/after tables and current comparison with HiGHS |
 | [Validation](validation.md) | Measured benchmark evidence and its practical limits |
 | [Benchmark methodology](benchmark_methodology.md) | How results are produced and compared fairly |
+| [Research features](research_features.md) | Opt-in experiments, source review, unfinished work and validation |
 | [Numerical robustness](numerical_robustness.md) | Numerical safeguards, tests and known weaknesses |
 | [Dependency policy](dependency_policy.md) | Independence of the solving core and external baseline separation |
 | [Phase 2 roadmap](phase2.md) | Remaining implementation and research priorities |
