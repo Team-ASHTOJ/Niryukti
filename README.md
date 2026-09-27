@@ -77,6 +77,8 @@ A changed model requires `--warm-start previous.json --allow-model-change`; vari
 
 ## Python
 
+Persistent model sessions, coupled refinery disruption scenarios and explicitly authorized infeasibility repair proposals are available. See [refinery replanning](docs/refinery_replanning.md); run `python3 examples/refinery_replanning.py` after building. These are synthetic CPU-validated demonstrations, not industrial performance claims.
+
 ```bash
 export PYTHONPATH="$PWD/python"
 # Optional packaging: pip install -e . ; set VANTAGE_BINARY if the binary is elsewhere.

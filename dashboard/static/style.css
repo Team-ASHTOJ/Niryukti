@@ -646,3 +646,14 @@ td small{display:block;color:var(--muted);font:400 12px var(--font);margin-top:3
 .capability-card p { line-height: 1.65; margin: 12px 0 0; }
 .dot-scip, .dot-highs-ipm { background: var(--clay, #a86d53); }
 .bar-value small { display: block; margin-top: 3px; font-size: 9px; opacity: .75; }
+.graph-tooltip{position:fixed;z-index:10000;width:min(360px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto;padding:16px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 36px #0003;font:12px var(--font);pointer-events:auto}
+.graph-tooltip[hidden]{display:none}
+.graph-tooltip>strong{display:block;font-size:14px;margin-bottom:12px}
+.graph-tooltip dl{margin:0}
+.graph-tooltip dl>div{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);gap:12px;padding:5px 0;border-top:1px solid var(--line)}
+.graph-tooltip dt{color:var(--muted)}
+.graph-tooltip dd{margin:0;overflow-wrap:anywhere}
+[data-graph-detail]{cursor:help}
+[data-graph-detail]:focus-visible{outline:2px solid var(--gold-ink);outline-offset:3px}
+.graph-sample{fill:transparent;stroke:transparent;pointer-events:all}
+.graph-sample:hover,.graph-sample:focus{fill:var(--gold-ink);stroke:var(--surface);stroke-width:2}

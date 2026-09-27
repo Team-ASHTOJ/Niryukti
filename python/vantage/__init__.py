@@ -85,3 +85,6 @@ class Model:
     def solve(self,**options):
         with tempfile.TemporaryDirectory(prefix='vantage-model-') as temp:
             path=Path(temp)/'model.json';self.write(path);return solve(path,**options)
+
+
+from .planning import SolverSession, diagnose_infeasibility, propose_repair

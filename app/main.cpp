@@ -1,5 +1,6 @@
 #include "json.hpp"
 #include "vantage/vantage.hpp"
+#include "session.hpp"
 #include <chrono>
 #include <fstream>
 #include <iostream>
@@ -11,7 +12,7 @@ int main(int argc, char **argv) {
         if (argc < 2) {
             std::cout
                 << "NIRYUKTI 0.2 — Independent Sparse Optimization Engine\nCommands: solve MODEL, "
-                   "inspect MODEL, explain MODEL, "
+                   "inspect MODEL, explain MODEL, session MODEL, "
                    "verify MODEL SOLUTION, convert INPUT OUTPUT, devices\nSolve: --device "
                    "cpu|cuda|auto --tol 1e-6 --time-limit 60 --iterations 100000\n       "
                    "--json-out result.json --warm-start result.json --threads 1 --verbose\n  "
@@ -37,6 +38,7 @@ int main(int argc, char **argv) {
         }
         if (argc < 3)
             throw std::runtime_error("Model path required");
+        if (cmd == "session") return run_session(argv[2]);
         auto parse_start = std::chrono::steady_clock::now();
         auto m = read_model(argv[2]);
         double parse_seconds =
