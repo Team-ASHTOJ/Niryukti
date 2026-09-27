@@ -18,7 +18,7 @@
     const host=canvas.parentElement;
     let timer=0,visible=false,phase=0,lastPointer=0;
     const ripples=[];
-    function allowed(){return visible&&!document.hidden&&effectsEnabled&&!reduced.matches&&(!state.job||state.job.state==='finished');}
+    function allowed(){return visible&&!document.hidden&&!reduced.matches&&(!state.job||state.job.state==='finished');}
     function face(points,color){
       ctx.fillStyle=color;ctx.beginPath();points.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.closePath();ctx.fill();
     }

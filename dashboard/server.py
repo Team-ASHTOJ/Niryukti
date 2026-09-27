@@ -7,6 +7,7 @@ import json
 import math
 import mimetypes
 import os
+import re
 from pathlib import Path
 import secrets
 import signal
@@ -273,7 +274,9 @@ class Handler(BaseHTTPRequestHandler):
                 if len(parts)>4 and parts[4]=='download':
                     return self.send(200, job.get('result', {}), filename=f'vantage-{key}.json')
                 item=public_job(job).copy(); log=STORE/f'{key}.log'
-                if log.exists(): item['logs']=log.read_text()[-16000:]
+                if log.exists():
+                    text=log.read_text(); item['logs']=text[-16000:]
+                    item['trace']='\n'.join(re.findall(r'iter=\d+ objective=\S+ primal=\S+ dual=\S+ gap=\S+', text))
                 return self.send(200, item)
             if path == '/api/export.csv':
                 out=io.StringIO(); writer=csv.writer(out);writer.writerow(['instance','backend','status','runs','optimal_runs','median_seconds','objective','primal_residual','kkt_error','mip_gap','relative_objective_error'])

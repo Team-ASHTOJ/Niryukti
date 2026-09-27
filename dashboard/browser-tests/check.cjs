@@ -21,7 +21,7 @@ const waveBefore=await wave.evaluate(c=>c.toDataURL());await page.waitForTimeout
 if(await wave.evaluate(c=>c.toDataURL())===waveBefore)throw Error('Wave field did not animate');
 await page.locator('#effects-toggle').click();await page.waitForTimeout(80);
 const pausedWave=await wave.evaluate(c=>c.toDataURL());await page.waitForTimeout(150);
-if(await wave.evaluate(c=>c.toDataURL())!==pausedWave)throw Error('Wave field ignored Effects off');
+if(await wave.evaluate(c=>c.toDataURL())===pausedWave)throw Error('Wave field stopped with Effects off');
 await page.locator('#effects-toggle').click();
 const animatedNav=page.locator('nav a[data-nav="benchmarks"]');
 const navWidth=await animatedNav.evaluate(e=>e.getBoundingClientRect().width);
