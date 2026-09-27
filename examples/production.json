@@ -1,0 +1,69 @@
+{
+  "name": "synthetic_two_period_production",
+  "sense": "min",
+  "variables": [
+    {
+      "name": "production_1",
+      "lb": 0,
+      "ub": 100
+    },
+    {
+      "name": "production_2",
+      "lb": 0,
+      "ub": 100
+    },
+    {
+      "name": "inventory_1",
+      "lb": 0,
+      "ub": 100
+    },
+    {
+      "name": "inventory_2",
+      "lb": 0,
+      "ub": 100
+    }
+  ],
+  "objective": {
+    "linear": [
+      4,
+      6,
+      0.2,
+      0.2
+    ]
+  },
+  "constraints": [
+    {
+      "name": "balance_1",
+      "lb": 40,
+      "ub": 40,
+      "coefficients": {
+        "production_1": 1,
+        "inventory_1": -1
+      }
+    },
+    {
+      "name": "balance_2",
+      "lb": 70,
+      "ub": 70,
+      "coefficients": {
+        "production_2": 1,
+        "inventory_1": 1,
+        "inventory_2": -1
+      }
+    },
+    {
+      "name": "capacity_1",
+      "ub": 75,
+      "coefficients": {
+        "production_1": 1
+      }
+    },
+    {
+      "name": "capacity_2",
+      "ub": 75,
+      "coefficients": {
+        "production_2": 1
+      }
+    }
+  ]
+}

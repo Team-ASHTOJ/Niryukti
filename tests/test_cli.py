@@ -14,9 +14,29 @@ def run(*args):return subprocess.run([binary,*map(str,args)],text=True,capture_o
 
 with tempfile.TemporaryDirectory(prefix='vantage-cli-tests-') as tmp:
     tmp=Path(tmp);sol=tmp/'solution.json'
+    qplib=tmp/'parsed.json'
+    r=run('convert',root/'examples/toy.qplib',qplib);assert r.returncode==0,r.stderr
+    r=run('solve',qplib);assert r.returncode==0,r.stderr
+    qdata=json.loads(r.stdout);assert qdata['status']=='OPTIMAL'
+    assert abs(qdata['objective']+1)<1e-5
+    bad_qplib=tmp/'bad.qplib';bad_qplib.write_text((root/'examples/toy.qplib').read_text().replace('\n2\n3\n','\n2junk\n3\n'))
+    assert run('inspect',bad_qplib).returncode==1
     r=run('solve',root/'examples/toy.lp','--json-out',sol);assert r.returncode==0,r.stderr
     data=json.loads(sol.read_text());assert data['status']=='OPTIMAL'
     assert run('verify',root/'examples/toy.lp',sol).returncode==0
+    pristine=dict(data)
+    data['objective']+=10;sol.write_text(json.dumps(data));assert run('verify',root/'examples/toy.lp',sol).returncode==2
+    data=dict(pristine); data['dual']=[10.0]*len(data['dual']);sol.write_text(json.dumps(data));assert run('verify',root/'examples/toy.lp',sol).returncode==2
+    for corrupt in ('fingerprint','nan','inf'):
+        data=json.loads(json.dumps(pristine))
+        if corrupt=='fingerprint':data['model']['fingerprint']='wrong-model'
+        else:data['primal'][0]=float(corrupt)
+        sol.write_text(json.dumps(data));assert run('verify',root/'examples/toy.lp',sol).returncode!=0
+    certificate=tmp/'certificate.json'
+    r=run('solve',root/'examples/toy.lp','--certificate-out',certificate);assert r.returncode==0,r.stderr
+    assert run('verify',root/'examples/toy.lp',certificate).returncode==0
+    assert json.loads(certificate.read_text())['verification_evidence']['tree_optimality_replayed'] is False
+    data=dict(pristine)
     data['primal']=[0,0];sol.write_text(json.dumps(data));assert run('verify',root/'examples/toy.lp',sol).returncode==2
     assert run('solve',root/'examples/toy.lp','--device','imaginary').returncode==1
     assert run('solve',root/'examples/toy.lp','--tol','nan').returncode==1
@@ -41,6 +61,13 @@ with tempfile.TemporaryDirectory(prefix='vantage-cli-tests-') as tmp:
     assert json.loads(r.stdout)['performance']['operator_norm_estimate']>0
     assert run('solve',root/'examples/toy.lp','--power-iterations','-1').returncode==1
     assert run('solve',root/'examples/dispatch.json','--polishing').returncode==1
+    # Fixed MPS: embedded blanks in names and an initially blank bound-set field.
+    fixed=tmp/'fixed.mps'
+    row=lambda kind,name: f' {kind}  {name:<8}\n'
+    column=lambda name,row,value: f'    {name:<8}  {row:<8}  {value:>12}\n'
+    fixed.write_text('NAME FIXED\nROWS\n'+row('N','OBJ')+row('G','DEM AND')+'COLUMNS\n'+column('FLOW A','OBJ','1')+column('FLOW A','DEM AND','1')+'RHS\n'+column('RHS','DEM AND','2')+'BOUNDS\n'+f' UP {"":8}  {"FLOW A":8}  {"3":>12}\n'+'ENDATA\n')
+    r=run('solve',fixed,'--method','simplex');assert r.returncode==0,r.stderr
+    assert abs(json.loads(r.stdout)['objective']-2)<1e-8
     # Malformed sparse JSON and malformed MPS may not crash or enter the engine.
     malformed=[{'variables':[],'objective':{'linear':[1]},'constraints':[]},
                {'variables':[{'name':'x'}],'objective':{'linear':[1]},'constraints':[{'coefficients':{'missing':1},'lb':2}]}]

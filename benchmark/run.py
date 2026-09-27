@@ -28,13 +28,15 @@ def execute(command, timeout):
     except OSError as e:return dict(status='UNAVAILABLE',message=str(e)),'',str(e),None,time.perf_counter()-tick
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('models',nargs='+');p.add_argument('--binary',default=str(ROOT/'build/vantage'));p.add_argument('--solvers',default='cpu,cuda,highs');p.add_argument('--runs',type=int,default=3);p.add_argument('--iterations',type=int,default=100000);p.add_argument('--time-limit',type=float,default=10);p.add_argument('--threads',type=int,default=1);p.add_argument('--tol',type=float,default=1e-6);p.add_argument('--output',default='results/latest');p.add_argument('--method',choices=['pdhg','halpern','rhpdhg','r2hpdhg'],default='pdhg');p.add_argument('--scaling',choices=['ruiz','combined'],default='ruiz');p.add_argument('--branching',choices=['fractional','reliability'],default='fractional');p.add_argument('--no-scaling',action='store_true');p.add_argument('--no-restart',action='store_true');p.add_argument('--no-adaptive',action='store_true')
+    p=argparse.ArgumentParser();p.add_argument('models',nargs='+');p.add_argument('--binary',default=str(ROOT/'build/vantage'));p.add_argument('--solvers',default='cpu,cuda,highs');p.add_argument('--runs',type=int,default=3);p.add_argument('--iterations',type=int,default=100000);p.add_argument('--time-limit',type=float,default=10);p.add_argument('--threads',type=int,default=1);p.add_argument('--tol',type=float,default=1e-6);p.add_argument('--output',default='results/latest');p.add_argument('--method',choices=['auto','simplex','pdhg','halpern','rhpdhg','r2hpdhg'],default='pdhg');p.add_argument('--scaling',choices=['ruiz','combined'],default='ruiz');p.add_argument('--branching',choices=['fractional','reliability'],default='fractional');p.add_argument('--no-scaling',action='store_true');p.add_argument('--no-restart',action='store_true');p.add_argument('--no-adaptive',action='store_true')
     p.add_argument('--primal-weight',choices=['displacement','pid'],default='displacement')
     p.add_argument('--power-iterations',type=int,default=0)
     p.add_argument('--polishing',action='store_true')
     p.add_argument('--cuts',action='store_true')
+    p.add_argument('--node-selection',choices=['best-bound','depth-first','best-estimate'],default='best-bound')
     p.add_argument('--primal-heuristic',choices=['repair','pump','rins','all'],default='repair')
     p.add_argument("--cuda-graphs",action="store_true")
+    p.add_argument("--gpu-monitor",action="store_true")
     p.add_argument("--gpu-indices",choices=["auto","32","64"],default="auto")
     p.add_argument("--matrix-precision",choices=["fp64","mixed"],default="fp64")
     a=p.parse_args()
@@ -48,6 +50,9 @@ def main():
     shutil.copy2(a.binary,raw/'vantage-measured')
     commit=subprocess.run(['git','rev-parse','HEAD'],cwd=ROOT,text=True,capture_output=True).stdout.strip() or 'uncommitted'
     metadata=dict(timestamp=time.strftime('%Y-%m-%dT%H:%M:%S%z'),platform=platform.platform(),cpu=platform.processor(),python=sys.version,git_commit=commit,arguments=vars(a),binary_sha256=hashlib.sha256(Path(a.binary).read_bytes()).hexdigest())
+    metadata['load_average']=list(os.getloadavg()) if hasattr(os,'getloadavg') else None
+    metadata['background_cpu_snapshot']=execute(['ps','-eo','comm,pcpu','--sort=-pcpu'],10)[1].splitlines()[:12]
+    metadata['measurement_scope']='Local machine; consult background CPU snapshot before interpreting timing'
     metadata['cpu_info']=next((line.split(':',1)[1].strip() for line in Path('/proc/cpuinfo').read_text().splitlines() if line.startswith('model name')),platform.processor()) if Path('/proc/cpuinfo').exists() else platform.processor()
     metadata['ram_bytes']=os.sysconf('SC_PAGE_SIZE')*os.sysconf('SC_PHYS_PAGES') if hasattr(os,'sysconf') else None
     metadata['compiler']=execute(['c++','--version'],10)[1]
@@ -55,6 +60,7 @@ def main():
     metadata['gpu_state']=execute(['nvidia-smi','--query-gpu=name,driver_version,memory.total,power.limit','--format=csv'],10)[1]
     cache=Path(a.binary).parent/'CMakeCache.txt'
     if cache.exists():metadata['cmake_cache']=cache.read_text()
+    metadata['source_sha256']={str(f.relative_to(ROOT)):hashlib.sha256(f.read_bytes()).hexdigest() for base in ['src','include','app'] for f in (ROOT/base).rglob('*') if f.is_file()}
     metadata['git_dirty']=bool(subprocess.run(['git','status','--porcelain'],cwd=ROOT,text=True,capture_output=True).stdout.strip())
     metadata['devices']=execute([a.binary,'devices'],10)[1];(out/'manifest.json').write_text(json.dumps(metadata,indent=2))
     rows=[]
@@ -74,6 +80,7 @@ def main():
                     if a.method!='pdhg':command+=['--method',a.method]
                     if a.scaling!='ruiz':command+=['--scaling',a.scaling]
                     if a.branching!='fractional':command+=['--branching',a.branching]
+                    if a.node_selection!='best-bound':command+=['--node-selection',a.node_selection]
                     if a.primal_weight!='displacement':command+=['--primal-weight',a.primal_weight]
                     if a.power_iterations:command+=['--power-iterations',str(a.power_iterations)]
                     if a.polishing:command+=['--polishing']
@@ -86,6 +93,7 @@ def main():
                 else:raise ValueError(f'Unknown solver {solver}')
                 if solver=='cuda':
                     if a.cuda_graphs:command+=['--cuda-graphs']
+                    if a.gpu_monitor:command+=['--gpu-monitor']
                     if a.gpu_indices!='auto':command+=['--gpu-indices',a.gpu_indices]
                     if a.matrix_precision!='fp64':command+=['--matrix-precision',a.matrix_precision]
                 data,stdout,stderr,code,wall=execute(command,a.time_limit+30)
@@ -100,10 +108,15 @@ def main():
                         if converted.exists():sense=1 if json.loads(converted.read_text())['sense']=='min' else -1
                     dual=[-sense*v for v in data.get('row_dual',[])]
                     if len(dual)!=inspect['rows']:dual=[0.0]*inspect['rows']
-                    sol=raw/f'{name}.solution.json';sol.write_text(json.dumps(dict(model=dict(fingerprint=inspect['fingerprint']),status=data['status'],primal=data['primal'],dual=dual)))
+                    sol=raw/f'{name}.solution.json';sol.write_text(json.dumps(dict(model=dict(fingerprint=inspect['fingerprint']),status=data['status'],objective=data.get('objective'),primal=data['primal'],dual=dual)))
                     v=execute([a.binary,'verify',str(path),str(sol)],20)[0];accuracy=v.get('accuracy',{});data['independent_verification']=v
+                reported_status=data.get('status','UNKNOWN')
+                status=reported_status
+                verification_status=data.get('independent_verification',{}).get('status')
+                if solver=='highs' and reported_status=='OPTIMAL' and verification_status not in ('VERIFIED_OPTIMAL','VERIFIED_FEASIBLE'):
+                    status='VERIFICATION_FAILED'
                 perf=data.get('performance',{})
-                record=dict(instance=path.name,solver=solver,run=run,warmup=run<0,status=data.get('status','UNKNOWN'),objective=data.get('objective'),primal_residual=accuracy.get('primal_residual'),dual_residual=accuracy.get('dual_residual'),kkt_error=accuracy.get('kkt_error'),iterations=perf.get('iterations'),end_to_end_seconds=perf.get('end_to_end_seconds'),iteration_seconds=perf.get('iteration_seconds'),process_wall_seconds=wall,rows=inspect.get('rows'),columns=inspect.get('columns'),nonzeros=inspect.get('nonzeros'),dataset_sha256=checksum)
+                record=dict(instance=path.name,solver=solver,run=run,warmup=run<0,status=status,reported_status=reported_status,verification_status=verification_status,problem_type=inspect.get('type'),objective=data.get('objective'),primal_residual=accuracy.get('primal_residual'),dual_residual=accuracy.get('dual_residual'),kkt_error=accuracy.get('kkt_error'),iterations=perf.get('iterations'),end_to_end_seconds=perf.get('end_to_end_seconds'),iteration_seconds=perf.get('iteration_seconds'),process_wall_seconds=wall,rows=inspect.get('rows'),columns=inspect.get('columns'),nonzeros=inspect.get('nonzeros'),dataset_sha256=checksum,method_selected=data.get('selection',{}).get('method'),device_reason=data.get('selection',{}).get('reason'),monitor_checks=perf.get('monitor_checks'),host_candidate_checks=perf.get('host_candidate_checks'),skipped_candidate_checks=perf.get('skipped_candidate_checks'),mip_gap=data.get('mip',{}).get('relative_gap',data.get('mip_gap')),nodes=data.get('mip',{}).get('nodes',data.get('nodes')))
                 (raw/f'{name}.json').write_text(json.dumps(dict(record=record,command=command,exit_code=code,result=data),indent=2))
                 if run>=0:rows.append(record)
                 print(f"{path.name:24} {solver:6} run={run:2} {record['status']:18} objective={record['objective']} wall={wall:.4f}s",flush=True)

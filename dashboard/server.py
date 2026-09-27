@@ -11,6 +11,7 @@ from pathlib import Path
 import secrets
 import signal
 import statistics
+import sys
 import subprocess
 import threading
 import time
@@ -25,7 +26,12 @@ TOKEN = secrets.token_urlsafe(32)
 LOCK = threading.Lock()
 JOBS = {}
 UPLOADED = {}
+GPU_SNAPSHOT = {}
+GPU_LOCK = threading.Lock()
 CATALOG = [
+    ('coupled_dispatch', 'Coupled power dispatch', 'QP', 'Industrial', 'examples/coupled_dispatch.json', 'Synthetic convex sparse quadratic generation costs with cross-generator coupling.'),
+    ('integer_dispatch', 'Integer power dispatch', 'MIQP', 'Industrial', 'examples/integer_dispatch.json', 'Synthetic integer dispatch with a convex quadratic cost and global gap.'),
+    ('production', 'Production and inventory', 'LP', 'Industrial', 'examples/production.json', 'Synthetic two-period capacity, inventory and demand balances.'),
     ('refinery', 'Crude blending', 'LP', 'Industrial', 'examples/refinery.json', 'Allocate crude flows while meeting demand, capacity and sulfur specifications.'),
     ('dispatch', 'Power dispatch', 'QP', 'Industrial', 'examples/dispatch.json', 'Balance generator output with a separable convex quadratic cost.'),
     ('supply_chain', 'Supply chain', 'MILP', 'Industrial', 'examples/supply_chain.json', 'Choose facilities and transport flows under capacity and demand limits.'),
@@ -36,6 +42,26 @@ CATALOG = [
     ('e226', 'E226', 'LP', 'Netlib', 'datasets/e226.mps', 'A harder public instance retained in the report despite incomplete convergence.'),
     ('refinery_large', 'Large-scale blending', 'LP', 'Scalability', 'datasets/refinery_large.mps', '46,720 variables across synthetic, largely independent refinery periods.'),
 ]
+
+
+def gpu_telemetry():
+    """Device-wide driver counters, not solver-attributed utilization or peak memory."""
+    with GPU_LOCK:
+        now=time.time()
+        if now-GPU_SNAPSHOT.get('timestamp',0)<2:return GPU_SNAPSHOT.copy()
+        snapshot=dict(timestamp=now,available=False,scope='Device-wide NVIDIA counters; includes other processes',devices=[])
+        try:
+            p=subprocess.run(['nvidia-smi','--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu','--format=csv,noheader,nounits'],capture_output=True,text=True,timeout=2)
+            if p.returncode==0:
+                for line in p.stdout.splitlines():
+                    values=next(csv.reader([line],skipinitialspace=True))
+                    if len(values)==5:
+                        snapshot['devices'].append(dict(name=values[0],utilization_percent=number(values[1]),memory_used_mb=number(values[2]),memory_total_mb=number(values[3]),temperature_c=number(values[4])))
+                snapshot['available']=bool(snapshot['devices'])
+        except (OSError,subprocess.TimeoutExpired):pass
+        GPU_SNAPSHOT.clear();GPU_SNAPSHOT.update(snapshot)
+        return snapshot.copy()
+
 
 def clean(value):
     if isinstance(value, float) and not math.isfinite(value): return None
@@ -60,7 +86,7 @@ def benchmarks():
     cases = {}
     sources = []
     # Prefer the public campaign for AFIRO; never count its demo repetitions as a new case.
-    campaigns = ['phase2-final'] if (ROOT/'results/phase2-final/summary.json').exists() else ['demo', 'netlib', 'scalability-final']
+    campaigns = ['submission-final'] if (ROOT/'results/submission-final/summary.json').exists() else ['phase2-final'] if (ROOT/'results/phase2-final/summary.json').exists() else ['demo', 'netlib', 'scalability-final']
     for suite in campaigns:
         folder = ROOT / 'results' / suite
         if not (folder / 'manifest.json').exists(): continue
@@ -79,7 +105,7 @@ def benchmarks():
         for key, engines in groups.items():
             entry = next((v for v in CATALOG if v[0] == key), None)
             sample = next(iter(engines.values()))[0][0]
-            case = dict(id=key, name=entry[1] if entry else key, type=entry[2] if entry else 'LP', category=entry[3] if entry else 'Other',
+            case = dict(id=key, name=entry[1] if entry else key, type=entry[2] if entry else sample.get('problem_type') or 'LP', category=entry[3] if entry else 'QPLIB' if sample['instance'].endswith('.qplib') else 'Public benchmarks',
                         suite=suite, rows=sample.get('rows'), columns=sample.get('columns'), nonzeros=sample.get('nonzeros'), engines={})
             for engine, values in engines.items():
                 records = [r for r, _ in values]
@@ -120,10 +146,64 @@ def public_job(job):
     return {k:v for k,v in job.items() if k not in ('process', 'path')}
 
 
+
+def run_arena(job, options):
+    """External benchmark orchestration only; never used as our solve engine."""
+    folder=STORE/('arena-'+job['id'])
+    python=ROOT/'.venv/bin/python'
+    command=[str(python) if python.is_file() else sys.executable,str(ROOT/'benchmark/run.py'),str(job['path']),
+             '--binary',str(BINARY),'--solvers','cpu,cuda,highs','--runs','3','--time-limit',str(options['time_limit']),
+             '--threads',str(options['threads']),'--tol',str(options['tol']),'--iterations',str(options['iterations']),
+             '--method',options['method'],'--branching',options['branching'],'--node-selection',options['node_selection'],
+             '--output',str(folder)]
+    for key,flag in [('cuts','--cuts'),('gpu_monitor','--gpu-monitor')]:
+        if options.get(key):command.append(flag)
+    for key,flag in [('adaptive','--no-adaptive'),('scaling','--no-scaling'),('restart','--no-restart')]:
+        if not options.get(key,True):command.append(flag)
+    job['state']='running';job['command']=command
+    try:
+        with (STORE/(job['id']+'.log')).open('w') as log:
+            proc=subprocess.Popen(command,stdout=log,stderr=log,start_new_session=True)
+            with LOCK:
+                job['process']=proc
+                if job.get('cancel_requested'):os.killpg(proc.pid,signal.SIGINT)
+            try:proc.wait(timeout=10*(options['time_limit']+30)+120)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid,signal.SIGTERM)
+                try:proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:os.killpg(proc.pid,signal.SIGKILL);proc.wait()
+        groups={}
+        for path in sorted((folder/'raw').glob('*.json')):
+            raw=json.loads(path.read_text());record=raw.get('record',{})
+            if not record or record.get('warmup') or record.get('run',-1)<0:continue
+            groups.setdefault(record['solver'],[]).append(record)
+        comparisons=[]
+        for solver in ['cpu','cuda','highs']:
+            records=groups.get(solver,[]);statuses=list(dict.fromkeys(r['status'] for r in records))
+            comparisons.append(dict(solver=solver,status=statuses[0] if len(statuses)==1 else 'MIXED' if statuses else 'UNAVAILABLE',
+                                    runs=len(records),optimal_runs=sum(r['status']=='OPTIMAL' for r in records),
+                                    seconds=median([number(r.get('end_to_end_seconds')) for r in records]),
+                                    objective=median([number(r.get('objective')) for r in records]),
+                                    primal=max((number(r.get('primal_residual')) for r in records if number(r.get('primal_residual')) is not None),default=None),
+                                    kkt=max((number(r.get('kkt_error')) for r in records if number(r.get('kkt_error')) is not None),default=None),
+                                    mip_gap=median([number(r.get('mip_gap')) for r in records])))
+        job['result']=dict(status='INTERRUPTED' if job.get('cancel_requested') else 'COMPARISON_COMPLETE' if proc.returncode==0 else 'COMPARISON_PARTIAL',
+                           comparisons=comparisons,report=f"/arena/{job['id']}/index.html" if (folder/'index.html').exists() else None,
+                           scope='Three sequential measured repetitions, CUDA warmup, equal budgets; failures retained. Device/algorithm choices can differ.')
+    except (OSError,ValueError) as error:job['result']=dict(status='PROCESS_ERROR',message=str(error),comparisons=[])
+    finally:
+        with LOCK:
+            job['state']='finished';job['finished_at']=time.time();job.pop('process',None)
+        (STORE/(job['id']+'.json')).write_text(json.dumps(clean(public_job(job)),indent=2))
+
+
 def run_job(job, options):
     command = [str(BINARY), 'solve', str(job['path']), '--device', options['device'], '--tol', str(options['tol']),
                '--time-limit', str(options['time_limit']), '--threads', str(options['threads']),
                '--iterations', str(options.get('iterations',100000)), '--verbose']
+    command += ['--method', options.get('method', 'pdhg'), '--branching', options.get('branching', 'fractional'), '--node-selection', options.get('node_selection', 'best-bound')]
+    if options.get('cuts'): command += ['--cuts']
+    if options.get('gpu_monitor') and options['device']=='cuda': command += ['--gpu-monitor']
     if not options.get('scaling', True): command += ['--scaling-passes', '0']
     if not options.get('restart', True): command += ['--no-restart']
     if not options.get('adaptive', True): command += ['--no-adaptive']
@@ -181,6 +261,7 @@ class Handler(BaseHTTPRequestHandler):
             path = unquote(urlparse(self.path).path)
             if path == '/api/bootstrap':
                 return self.send(200, dict(token=TOKEN, models=catalog(), benchmarks=benchmarks(), binary_available=BINARY.exists()))
+            if path == '/api/system': return self.send(200,gpu_telemetry())
             if path == '/api/benchmarks': return self.send(200, benchmarks())
             if path == '/api/runs':
                 with LOCK: jobs = [public_job(j) for j in JOBS.values()]
@@ -199,9 +280,17 @@ class Handler(BaseHTTPRequestHandler):
                 for c in benchmarks()['cases']:
                     for backend,e in c['engines'].items(): writer.writerow([c['id'],backend,e['status'],e['runs'],e['solved'],e['seconds'],e['objective'],e['primal'],e['kkt'] if c['type']!='MILP' else '',e['gap'],e['objective_error']])
                 return self.send(200,out.getvalue(),'text/csv; charset=utf-8','vantage-benchmarks.csv')
+            if path.startswith('/arena/'):
+                parts=Path(path).parts
+                if len(parts)<4 or parts[2] not in JOBS or JOBS[parts[2]].get('kind')!='arena':return self.send(404,dict(error='Arena report unavailable'))
+                base=(STORE/('arena-'+parts[2])).resolve();file=(base/Path(*parts[3:])).resolve()
+                if not file.is_relative_to(base) or file.suffix not in ('.html','.json','.csv','.stdout','.stderr'):return self.send(404,dict(error='Arena file unavailable'))
+                if not file.is_file():return self.send(404,dict(error='Arena file unavailable'))
+                return self.send(200,file.read_bytes(),mimetypes.guess_type(file)[0] or 'application/octet-stream')
             if path.startswith('/reports/'):
+
                 rest=path.removeprefix('/reports/'); parts=Path(rest).parts
-                if not parts or parts[0] not in ('demo','netlib','scalability-final','phase2-final'): return self.send(404, dict(error='Unknown report'))
+                if not parts or parts[0] not in ('demo','netlib','scalability-final','phase2-final','submission-final'): return self.send(404, dict(error='Unknown report'))
                 file=(ROOT/'results'/rest).resolve()
                 if not file.is_relative_to(ROOT/'results'/parts[0]) or file.suffix not in ('.html','.json','.csv','.stdout','.stderr'): return self.send(404,dict(error='File unavailable'))
             else:
@@ -220,7 +309,7 @@ class Handler(BaseHTTPRequestHandler):
             body=json.loads(self.rfile.read(length));path=urlparse(self.path).path
             if path == '/api/upload':
                 name=Path(body.get('name','')).name; suffix=Path(name).suffix.lower()
-                if suffix not in ('.mps','.lp','.json'): return self.send(400,dict(error='Choose an MPS, LP or JSON model.'))
+                if suffix not in ('.mps','.lp','.json','.qps','.qplib'): return self.send(400,dict(error='Choose an MPS, LP, JSON, QPS or supported QPLIB model.'))
                 text=body.get('content')
                 if not isinstance(text,str): return self.send(400,dict(error='Text model required.'))
                 key=secrets.token_hex(8); file=STORE/(key+suffix);file.write_text(text)
@@ -235,13 +324,22 @@ class Handler(BaseHTTPRequestHandler):
                 device=body.get('device','cpu');tol=float(body.get('tol',1e-6));limit=float(body.get('time_limit',30));threads=int(body.get('threads',4));iterations=int(body.get('iterations',100000))
                 if device not in ('cpu','cuda','auto') or tol not in (1e-4,1e-6,1e-8) or not 1<=limit<=120 or not 1<=threads<=32 or not 1<=iterations<=2000000:
                     return self.send(400,dict(error='Invalid solver settings.'))
+                kind=body.get('kind','solve')
+                if kind not in ('solve','arena') or (kind=='arena' and limit>15):return self.send(400,dict(error='Arena supports at most 15 seconds per measured run.'))
+                method=body.get('method','pdhg');branching=body.get('branching','fractional');node_selection=body.get('node_selection','best-bound')
+                if method not in ('auto','simplex','pdhg','rhpdhg','r2hpdhg') or branching not in ('fractional','reliability') or node_selection not in ('best-bound','depth-first','best-estimate'):
+                    return self.send(400,dict(error='Invalid algorithm settings.'))
+                if method=='simplex' and device=='cuda':
+                    return self.send(400,dict(error='Simplex currently runs on CPU.'))
+                if method in ('rhpdhg','r2hpdhg') and body.get('adaptive',True):
+                    return self.send(400,dict(error='Halpern methods require adaptive step sizes to be disabled.'))
                 with LOCK:
                     if any(j['state']!='finished' for j in JOBS.values()): return self.send(409,dict(error='A solve is already running. Cancel or wait for it to finish.'))
                     ident=secrets.token_hex(8)
-                    job=dict(id=ident,model=key,name=entry[1] if entry else model.name,state='queued',started_at=time.time(),path=model)
+                    job=dict(id=ident,kind=kind,model=key,name=entry[1] if entry else model.name,state='queued',started_at=time.time(),path=model)
                     JOBS[ident]=job
-                options=dict(device=device,tol=tol,time_limit=limit,threads=threads,iterations=iterations,adaptive=bool(body.get('adaptive',True)),scaling=bool(body.get('scaling',True)),restart=bool(body.get('restart',True)))
-                job['options']=options; threading.Thread(target=run_job,args=(job,options),daemon=True).start()
+                options=dict(method=method,branching=branching,node_selection=node_selection,cuts=bool(body.get('cuts',False)),gpu_monitor=bool(body.get('gpu_monitor',False)),device=device,tol=tol,time_limit=limit,threads=threads,iterations=iterations,adaptive=bool(body.get('adaptive',True)),scaling=bool(body.get('scaling',True)),restart=bool(body.get('restart',True)))
+                job['options']=options; threading.Thread(target=run_arena if kind=='arena' else run_job,args=(job,options),daemon=True).start()
                 return self.send(202,public_job(job))
             if path.startswith('/api/runs/') and path.endswith('/cancel'):
                 key=path.split('/')[3]
@@ -249,21 +347,23 @@ class Handler(BaseHTTPRequestHandler):
                     job=JOBS.get(key)
                     if not job: return self.send(404,dict(error='Run not found'))
                     job['cancel_requested']=True;proc=job.get('process')
-                    if proc and proc.poll() is None: proc.send_signal(signal.SIGINT)
+                    if proc and proc.poll() is None:
+                        if job.get('kind')=='arena':os.killpg(proc.pid,signal.SIGINT)
+                        else:proc.send_signal(signal.SIGINT)
                 return self.send(200,dict(ok=True))
             return self.send(404,dict(error='Unknown action'))
         except (ValueError,TypeError,OSError,subprocess.TimeoutExpired) as exc: return self.send(400,dict(error=str(exc)))
 
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--port',type=int,default=8080);args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--port',type=int,default=8080);parser.add_argument('--host',choices=['127.0.0.1','0.0.0.0'],default='127.0.0.1');args=parser.parse_args()
     STORE.mkdir(parents=True,exist_ok=True)
     for path in STORE.glob('*.json'):
         try:
             job=json.loads(path.read_text())
             if isinstance(job,dict) and job.get('state')=='finished' and job.get('id'): JOBS[job['id']]=job
         except (ValueError,OSError): pass
-    server=ThreadingHTTPServer(('127.0.0.1',args.port),Handler)
+    server=ThreadingHTTPServer((args.host,args.port),Handler)
     print(f'NIRYUKTI dashboard → http://127.0.0.1:{args.port}',flush=True)
     try: server.serve_forever()
     except KeyboardInterrupt: pass

@@ -10,8 +10,29 @@ long double up(long double v) {
     return std::nextafter(v, std::numeric_limits<long double>::infinity());
 }
 double lp_lower_bound(const Model &m, const Sparse &at, const std::vector<double> &y,
-                      bool feasibility = false) {
+                      bool feasibility = false, const std::vector<double> *point = nullptr) {
     long double lower = feasibility ? 0 : m.offset;
+    if (point) {
+        // Convex affine minorant f(z) >= f(x)+grad f(x)'(z-x).
+        // Enclose every coefficient/constant operation before minimizing over the box.
+        for (size_t i = 0; i < m.c.size(); ++i) {
+            long double square = up((long double)(*point)[i] * (*point)[i]);
+            if (m.q[i] != 0) {
+                long double lo = down((long double)(*point)[i] * (*point)[i]);
+                long double term = m.q[i] >= 0 ? up(m.q[i] * square) : up(m.q[i] * lo);
+                lower = down(lower - up(.5L * term));
+            }
+            if (!m.Q.value.empty())
+                for (auto k = m.Q.ptr[i]; k < m.Q.ptr[i + 1]; ++k) {
+                    auto j = m.Q.index[k];
+                    long double v = m.Q.value[k];
+                    long double lo = down((long double)(*point)[i] * (*point)[j]);
+                    long double hi = up((long double)(*point)[i] * (*point)[j]);
+                    long double term = up(v * (v >= 0 ? hi : lo));
+                    lower = down(lower - up(.5L * term));
+                }
+        }
+    }
     for (size_t i = 0; i < y.size(); i++)
         if (y[i] != 0) {
             double b = y[i] > 0 ? m.ru[i] : m.rl[i];
@@ -24,6 +45,19 @@ double lp_lower_bound(const Model &m, const Sparse &at, const std::vector<double
         }
     for (size_t j = 0; j < m.c.size(); j++) {
         long double gl = feasibility ? 0 : m.c[j], gu = gl;
+        if (point) {
+            auto add = [&](double coefficient, double value) {
+                if (coefficient == 0 || value == 0)
+                    return;
+                long double term = (long double)coefficient * value;
+                gl = down(gl + down(term));
+                gu = up(gu + up(term));
+            };
+            add(m.q[j], (*point)[j]);
+            if (!m.Q.value.empty())
+                for (auto k = m.Q.ptr[j]; k < m.Q.ptr[j + 1]; ++k)
+                    add(m.Q.value[k], (*point)[m.Q.index[k]]);
+        }
         for (auto k = at.ptr[j]; k < at.ptr[j + 1]; k++)
             if (y[at.index[k]] != 0 && at.value[k] != 0) {
                 long double v = (long double)at.value[k] * y[at.index[k]];
@@ -188,8 +222,10 @@ Accuracy Verifier::evaluate(const std::vector<double> &x, const std::vector<doub
         a.gap = std::max(a.gap, std::abs(a.objective - a.lower_bound) /
                                     (1 + std::abs(a.objective) + std::abs(a.lower_bound)));
     }
-    if (!m.is_qp())
-        a.lower_bound = compute_safe_bound ? lp_lower_bound(m, transpose, y) : -inf;
+    if (compute_safe_bound)
+        a.lower_bound = lp_lower_bound(m, transpose, y, false, m.is_qp() ? &x : nullptr);
+    else if (!m.is_qp())
+        a.lower_bound = -inf;
     if (std::isfinite(a.lower_bound))
         a.gap = std::max(a.gap, std::abs(a.objective - a.lower_bound) /
                                     (1 + std::abs(a.objective) + std::abs(a.lower_bound)));

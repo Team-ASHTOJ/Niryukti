@@ -36,6 +36,17 @@ void extra_scale(Prepared &p, std::vector<double> row, std::vector<double> col) 
         if (!representable(m.A.value[k], m.A.value[k] * col[j]))
             col[j] = 1;
     }
+    if (!m.Q.value.empty() && m.c.size() > 256)
+        std::fill(col.begin(), col.end(), 1);
+    bool qsafe = true;
+    for (int64_t i = 0; i < m.Q.rows; ++i)
+        for (auto k = m.Q.ptr[i]; k < m.Q.ptr[i + 1]; ++k)
+            qsafe &= representable(m.Q.value[k], (m.Q.value[k] * col[i]) * col[m.Q.index[k]]);
+    if (!qsafe)
+        std::fill(col.begin(), col.end(), 1);
+    for (int64_t i = 0; i < m.Q.rows; ++i)
+        for (auto k = m.Q.ptr[i]; k < m.Q.ptr[i + 1]; ++k)
+            m.Q.value[k] *= col[i] * col[m.Q.index[k]];
     for (size_t j = 0; j < col.size(); j++) {
         double f = col[j];
         p.column_scale[j] *= f;
@@ -116,19 +127,6 @@ std::vector<double> Prepared::restore_y(const std::vector<double> &y, size_t n) 
 }
 Prepared prepare(const Model &src, const Options &o) {
     Prepared p;
-    if (!src.Q.value.empty()) {
-        // Full-Q transformations need cross-term postsolve bookkeeping. Preserve the
-        // original sparse model until those transformations are implemented.
-        p.model = src;
-        p.fixed.assign(src.c.size(), 0);
-        p.cols.resize(src.c.size());
-        p.rows.resize(src.rl.size());
-        std::iota(p.cols.begin(), p.cols.end(), 0);
-        std::iota(p.rows.begin(), p.rows.end(), 0);
-        p.column_scale.assign(src.c.size(), 1);
-        p.row_scale.assign(src.rl.size(), 1);
-        return p;
-    }
     p.fixed.assign(src.c.size(), 0);
     Model &m = p.model;
     m.name = src.name;
@@ -138,6 +136,11 @@ Prepared prepare(const Model &src, const Options &o) {
     std::vector<bool> used(src.c.size(), false);
     for (auto j : src.A.index)
         used[j] = true;
+    for (auto j : src.Q.index)
+        used[j] = true;
+    for (int64_t i = 0; i < src.Q.rows; ++i)
+        if (src.Q.ptr[i] != src.Q.ptr[i + 1])
+            used[i] = true;
     for (size_t j = 0; j < src.c.size(); j++) {
         double chosen = src.lb[j];
         bool removable = src.lb[j] == src.ub[j];
@@ -162,6 +165,19 @@ Prepared prepare(const Model &src, const Options &o) {
             m.types.push_back(VarType::Continuous);
         }
     }
+    std::vector<Entry> qe;
+    for (int64_t i = 0; i < src.Q.rows; ++i)
+        for (auto k = src.Q.ptr[i]; k < src.Q.ptr[i + 1]; ++k) {
+            auto j = src.Q.index[k];
+            auto v = src.Q.value[k];
+            if (map[i] >= 0 && map[j] >= 0)
+                qe.push_back({map[i], map[j], v});
+            else if (map[i] >= 0)
+                m.c[map[i]] += v * p.fixed[j];
+            else if (map[j] < 0)
+                m.offset += .5 * v * p.fixed[i] * p.fixed[j];
+        }
+    m.Q = Sparse::build(m.c.size(), m.c.size(), std::move(qe));
     std::vector<Entry> e;
     for (size_t i = 0; i < src.rl.size(); i++) {
         long double shift = 0, shift_magnitude = 0;
@@ -223,31 +239,21 @@ Prepared prepare(const Model &src, const Options &o) {
         geometric_scale(p);
     // Ruiz infinity-norm equilibration, x_original = D_c x_scaled.
     for (int pass = 0; pass < o.scaling_passes; pass++) {
-        for (size_t i = 0; i < m.rl.size(); i++) {
+        std::vector<double> row(m.rl.size(), 1), col(m.c.size(), 1);
+        for (size_t i = 0; i < row.size(); ++i) {
             double norm = 0;
-            for (auto k = m.A.ptr[i]; k < m.A.ptr[i + 1]; k++)
+            for (auto k = m.A.ptr[i]; k < m.A.ptr[i + 1]; ++k)
                 norm = std::max(norm, std::abs(m.A.value[k]));
-            double f = norm > 0 ? std::clamp(1 / std::sqrt(norm), 1e-3, 1e3) : 1;
-            p.row_scale[i] *= f;
-            m.rl[i] *= f;
-            m.ru[i] *= f;
-            for (auto k = m.A.ptr[i]; k < m.A.ptr[i + 1]; k++)
-                m.A.value[k] *= f;
+            row[i] = norm > 0 ? std::clamp(1 / std::sqrt(norm), 1e-3, 1e3) : 1.;
         }
-        std::vector<double> norm(m.c.size());
-        for (size_t k = 0; k < m.A.value.size(); k++)
+        extra_scale(p, row, col);
+        std::vector<double> norm(col.size());
+        for (size_t k = 0; k < m.A.value.size(); ++k)
             norm[m.A.index[k]] = std::max(norm[m.A.index[k]], std::abs(m.A.value[k]));
-        for (size_t j = 0; j < norm.size(); j++) {
-            double f = norm[j] > 0 ? std::clamp(1 / std::sqrt(norm[j]), 1e-3, 1e3) : 1;
-            norm[j] = f;
-            p.column_scale[j] *= f;
-            m.c[j] *= f;
-            m.q[j] *= f * f;
-            m.lb[j] /= f;
-            m.ub[j] /= f;
-        }
-        for (size_t k = 0; k < m.A.value.size(); k++)
-            m.A.value[k] *= norm[m.A.index[k]];
+        for (size_t j = 0; j < col.size(); ++j)
+            col[j] = norm[j] > 0 ? std::clamp(1 / std::sqrt(norm[j]), 1e-3, 1e3) : 1.;
+        std::fill(row.begin(), row.end(), 1);
+        extra_scale(p, row, col);
     }
     if (o.scaling == "combined" && o.scaling_passes > 0)
         pock_chambolle_scale(p);
@@ -257,10 +263,14 @@ Prepared prepare(const Model &src, const Options &o) {
             cnorm = std::max(cnorm, std::abs(c));
         for (auto q : m.q)
             cnorm = std::max(cnorm, std::abs(q));
+        for (auto q : m.Q.value)
+            cnorm = std::max(cnorm, std::abs(q));
         p.objective_scale = cnorm > 0 ? cnorm : 1;
         for (auto &c : m.c)
             c /= p.objective_scale;
         for (auto &q : m.q)
+            q /= p.objective_scale;
+        for (auto &q : m.Q.value)
             q /= p.objective_scale;
         m.offset /= p.objective_scale;
     }

@@ -7,3 +7,7 @@ Production dependencies are the C++ standard/runtime libraries, optional OpenMP,
 Only `benchmark/adapters/highs.py` imports HiGHS. It runs as an external comparison process; the benchmark Python environment is separate from the product API. `scripts/check_dependencies.py` scans production source/build/package definitions for accidental optimization-engine references. This is a regression guard, not a substitute for source review.
 
 The mathematical references are listed in `docs/algorithms.md`. No solver source was transplanted or renamed. Cached public benchmark files were obtained from a pinned HiGHS test-data mirror; these are model data, with source URLs/checksums and mirror license retained under `datasets/`. All generated industrial examples are labeled synthetic.
+
+## Eigen numerical infrastructure
+
+Vendored Eigen 5.0.0 is used only for sparse LU of simplex basis systems. It is ordinary numerical linear algebra, alongside cuSPARSE, not an optimization engine. The unsupported optimization module tree is excluded; solver search/pivot/cut logic remains our code. Source URL, archive SHA-256 and upstream copying notices are retained. Build with `-DVANTAGE_SPARSE_LU=OFF` to use the bounded own dense factorization kernel instead.

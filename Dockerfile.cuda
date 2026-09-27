@@ -1,0 +1,22 @@
+FROM nvidia/cuda:12.8.1-devel-ubuntu24.04 AS build
+RUN apt-get update && apt-get install -y --no-install-recommends cmake g++ make && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY CMakeLists.txt ./
+COPY include include
+COPY src src
+COPY app app
+COPY tests tests
+COPY third_party third_party
+RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DVANTAGE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90" && cmake --build build -j 4
+FROM nvidia/cuda:12.8.1-runtime-ubuntu24.04
+RUN apt-get update && apt-get install -y --no-install-recommends python3 libgomp1 libcusparse-12-8 && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/vantage
+COPY --from=build /src/build/vantage build/vantage
+COPY dashboard dashboard
+COPY examples examples
+COPY datasets datasets
+COPY docs docs
+RUN useradd --create-home solver && mkdir -p results && chown solver:solver results
+USER solver
+ENTRYPOINT ["/opt/vantage/build/vantage"]
+CMD ["devices"]

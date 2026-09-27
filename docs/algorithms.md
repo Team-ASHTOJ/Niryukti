@@ -101,3 +101,32 @@ The implementation was written independently from these mathematical ideas; no s
 For a binary knapsack `sum a_j x_j <= b`, a cover C satisfying `sum_C a_j > b` gives `sum_C x_j <= |C|-1`. A clique whose every pair satisfies `a_i+a_j>b` gives `sum_C x_j<=1`. The separator uses exact integer coefficients and capacities, restricts eligible magnitudes, and checks these conditions without tolerance. It adds global root cuts only. General MIR/GMI separation is not implemented.
 
 The feasibility pump alternates integer rounding with minimizing L1 distance to the rounded assignment over the current LP relaxation. General integer distances use epigraph variables with `x_j-d_j<=target_j`, `-x_j-d_j<=-target_j`, and `d_j>=0`. Deterministic perturbations break repeated rounded assignments. RINS fixes integer coordinates shared by an incumbent and relaxation solution, then runs a bounded sub-MIP. Its restricted bounds never prune the global tree. Every heuristic incumbent is checked against the original model.
+
+## September submission additions
+
+### General sparse QP and MIQP bounds
+
+The additional symmetric sparse matrix and diagonal shorthand contribute to the same quadratic objective. General Q uses smooth primal-dual splitting with sparse `Q*x` and conservative steps satisfying `tau*sigma*||A||² + tau*L_Q/2 < 1`; this is not a claimed rAPDHG reproduction. The existing diagonal proximal path remains available.
+
+At any point `x`, convexity gives an affine minorant of the objective. For row multiplier `y`, let `g = c + Q*x + Aᵀ*y` (including the diagonal shorthand), and `h(y)` be the support function of the row interval. Then
+
+```
+LB = objective_offset - h(y) - 0.5*xᵀQ*x
+     + sum_j min(g_j*lb_j, g_j*ub_j).
+```
+
+The implementation encloses coefficients, quadratic terms and support contributions with outward-rounded long-double intervals. If a free bound makes the interval minimization unavailable, the result is negative infinity and cannot prune a node. Numerical convexity validation remains a prerequisite; it is not a formal exact-arithmetic PSD certificate.
+
+### Compact revised primal simplex
+
+A two-phase standardization shifts/splits variables and introduces slack, surplus and artificial columns. Phase I minimizes the artificial-variable sum; phase II prices original objective reduced costs. Pricing columns remain sparse. Sparse Eigen LU numerical factorization and product-form updates solve basis systems; an optional own dense kernel remains available; periodic refactorization and a Bland fallback address some numerical drift/degeneracy. The sparse numerical path has a 4096 transformed-row guard; the optional dense path retains 512. Original-space verification controls `OPTIMAL`; general improving rays currently remain `UNKNOWN` until a recession certificate is available. This is not a warm-basis dual-simplex engine.
+
+### Restricted root mixed-integer rounding
+
+For a transformed row `sum(a_j*z_j) >= b`, nonnegative shifted variables and integral shifts for integer columns, write `f = b-floor(b)`, with `0 < f < 1`. Integer coefficients become `floor(a_j)+min(1, frac(a_j)/f)`; continuous coefficients become `max(0,a_j)/f`; the cut RHS is `ceil(b)`. Only safe finite shifts are accepted. Coefficients round upward and RHS downward to weaken the resulting inequality conservatively. Independently enumerated mixed feasible points test validity. Separation is root-only and opt-in; no tableau/Gomory or dynamic cut-pool claim is made.
+
+### Search policies and CUDA diagnostics
+
+Queued integer nodes store bound differences relative to root bounds. Best-bound, depth-first and best-estimate selection are ordering policies only. Reported global bounds always take the minimum over all open/unresolved nodes, regardless of queue ordering.
+
+CUDA monitoring computes scaled current/averaged diagnostic quantities and transfers a scalar. This can defer expensive host candidate checks. It does not replace final independent original-space verification and does not imply fully device-resident restart/control or an independent GPU certificate.

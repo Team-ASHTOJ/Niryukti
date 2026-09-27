@@ -88,3 +88,7 @@ No numerical core changes were made after the tested/measured 0.2 executable was
 ## 27 September 2026 — optimization checkpoint
 
 Added and tested CUDA Halpern variants, graph execution, 32/64-bit CSR selection, experimental mixed matrices and sparse off-diagonal convex QP with CPU/CUDA gradient paths and original-space verification. CUDA research assertions: 2,613. Stopped at user request; partial benchmark evidence retained without speedup claims. See [handoff and pending work](optimization_handoff_20260927.md) and [audit](optimization_audit.md).
+
+## 2026-09-27 — main integration and submission engineering
+
+Frontend fast-forward merged and pushed to main; default branch updated. Sparse QP transformations, conservative MIQP bounds, compact revised primal simplex, MIR cuts, node storage/policies, CUDA diagnostic gating and certificate checks are being implemented and validated. See [the detailed record](submission_round_20260927.md); benchmark claims will be added only after measured campaigns.

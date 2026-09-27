@@ -22,7 +22,7 @@ Result solve(const Model &m, const Options &o) {
         throw std::runtime_error("Invalid solver options");
     if (o.device != "auto" && o.device != "cpu" && o.device != "cuda")
         throw std::runtime_error("Unknown device");
-    if (o.method != "pdhg" && !anchored_method(o))
+    if (o.method != "pdhg" && o.method != "simplex" && o.method != "auto" && !anchored_method(o))
         throw std::runtime_error("Unknown method: use pdhg, halpern, rhpdhg or r2hpdhg");
     if (o.primal_weight != "displacement" && o.primal_weight != "pid")
         throw std::runtime_error("Unknown primal weight controller");
@@ -33,6 +33,9 @@ Result solve(const Model &m, const Options &o) {
         throw std::runtime_error("Feasibility polishing currently requires LP relaxations");
     if (o.scaling != "ruiz" && o.scaling != "combined")
         throw std::runtime_error("Unknown scaling: use ruiz or combined");
+    if (o.node_selection != "best-bound" && o.node_selection != "depth-first" &&
+        o.node_selection != "best-estimate")
+        throw std::runtime_error("Unknown node selection policy");
     if (o.branching != "fractional" && o.branching != "reliability")
         throw std::runtime_error("Unknown branching: use fractional or reliability");
     if (anchored_method(o) && (o.adaptive || m.is_qp() || m.is_mip()))
@@ -64,12 +67,6 @@ Result solve(const Model &m, const Options &o) {
         r.message = "Nonconvex quadratic objective";
         return r;
     }
-    if (m.is_mip() && m.is_qp()) {
-        Result r;
-        r.status = "UNSUPPORTED";
-        r.message = "MIQP is not implemented";
-        return r;
-    }
     if (o.device == "cuda" && !cuda_available()) {
         Result r;
         r.status = "UNSUPPORTED";
@@ -83,8 +80,19 @@ Result solve(const Model &m, const Options &o) {
 Result solve_continuous(const Model &original, const Options &o) {
     if (anchored_method(o) && (o.adaptive || original.is_qp() || original.is_mip()))
         throw std::runtime_error("Experimental Halpern supports continuous LP with --no-adaptive");
+    if (o.method == "simplex" || (o.method == "auto" && o.device != "cuda" && !original.is_qp() &&
+                                  original.A.rows <= simplex_row_limit())) {
+        auto simplex = solve_simplex(original, o);
+        if (o.method == "simplex" || simplex.status != "UNSUPPORTED")
+            return simplex;
+    }
     auto start = Clock::now();
     Result r;
+    r.method_selected =
+        original.Q.value.empty() ? (o.method == "auto" ? "pdhg" : o.method) : "smooth-primal-dual";
+    r.device_reason = "Preprocessing/candidate verification; iterative backend not yet required";
+    r.estimated_gpu_bytes = 48. * (original.A.value.size() + original.Q.value.size()) +
+                            240. * (original.A.rows + original.A.cols + 2);
     Verifier verifier(original);
     r.status = "ITERATION_LIMIT";
     auto prep = prepare(original, o);
@@ -114,6 +122,11 @@ Result solve_continuous(const Model &original, const Options &o) {
         std::vector<bool> used(m.c.size(), false);
         for (auto j : m.A.index)
             used[j] = true;
+        for (int64_t i = 0; i < m.Q.rows; ++i)
+            for (auto k = m.Q.ptr[i]; k < m.Q.ptr[i + 1]; ++k) {
+                used[i] = true;
+                used[m.Q.index[k]] = true;
+            }
         for (size_t j = 0; j < x.size(); j++)
             if (!used[j] && m.q[j] == 0 &&
                 ((m.c[j] < 0 && m.ub[j] == inf) || (m.c[j] > 0 && m.lb[j] == -inf))) {
@@ -169,19 +182,40 @@ Result solve_continuous(const Model &original, const Options &o) {
         if (c2 > 1e-24 && b2 > 1e-24)
             weight = std::clamp(std::sqrt(double(c2 / b2)), 1e-4, 1e4);
     }
-    bool usecuda = o.device == "cuda" ||
-                   (o.device == "auto" && cuda_available() &&
-                    (m.A.value.size() >= 100000 || o.cuda_graphs || o.matrix_precision == "mixed"));
+    bool usecuda = o.device == "cuda" || (o.device == "auto" && cuda_available() &&
+                                          (m.A.value.size() + m.Q.value.size() >= 100000 ||
+                                           o.cuda_graphs || o.matrix_precision == "mixed"));
     r.backend = usecuda ? "cuda" : "cpu";
     r.device_name = usecuda ? cuda_description() : "CPU";
     auto transfer = Clock::now();
     bool residual_restarts = o.method == "rhpdhg" || o.method == "r2hpdhg";
-    auto backend = usecuda
-                       ? cuda_backend(m, x, y, o.adaptive, anchored_method(o),
-                                      o.method == "r2hpdhg" ? 1 : 0, residual_restarts && o.restart,
-                                      o.cuda_graphs, o.gpu_indices, o.matrix_precision)
-                       : cpu_backend(m, x, y, o.adaptive, anchored_method(o),
-                                     o.method == "r2hpdhg" ? 1 : 0, residual_restarts && o.restart);
+    r.device_reason =
+        o.device != "auto" ? "Explicit backend request"
+        : usecuda
+            ? "CUDA available; sparse work exceeds threshold or explicit GPU feature requested"
+            : "CPU selected: small sparse workload or CUDA unavailable";
+    std::unique_ptr<IterationBackend> backend;
+    if (usecuda) {
+        try {
+            backend = cuda_backend(m, x, y, o.adaptive, anchored_method(o),
+                                   o.method == "r2hpdhg" ? 1 : 0, residual_restarts && o.restart,
+                                   o.cuda_graphs, o.gpu_indices, o.matrix_precision);
+        } catch (const std::runtime_error &error) {
+            std::string reason = error.what();
+            bool memory_failure = reason.find("Estimated GPU storage") != std::string::npos ||
+                                  reason.find("out of memory") != std::string::npos;
+            if (o.device != "auto" || o.cuda_graphs || o.matrix_precision != "fp64" ||
+                !memory_failure)
+                throw;
+            usecuda = false;
+            r.backend = "cpu";
+            r.device_name = "CPU";
+            r.device_reason = "Automatic CPU fallback during GPU memory allocation: " + reason;
+        }
+    }
+    if (!backend)
+        backend = cpu_backend(m, x, y, o.adaptive, anchored_method(o),
+                              o.method == "r2hpdhg" ? 1 : 0, residual_restarts && o.restart);
     r.transfer_seconds = elapsed(transfer);
     if (usecuda) {
         bool fits32 =
@@ -194,7 +228,7 @@ Result solve_continuous(const Model &original, const Options &o) {
     int64_t since_restart = 0;
     std::vector<double> epochx = x, epochy = y;
     PrimalWeightController controller;
-    int64_t next_polish = 100, previous_rejected = 0;
+    int64_t next_polish = 100, previous_rejected = 0, next_host_check = 0;
     while (r.iterations < o.iteration_limit) {
         if (interrupted) {
             r.status = "INTERRUPTED";
@@ -213,6 +247,24 @@ Result solve_continuous(const Model &original, const Options &o) {
         auto rejected = backend->rejected_steps();
         r.rejected_steps += rejected - previous_rejected;
         previous_rejected = rejected;
+        tick = Clock::now();
+        if (usecuda && o.gpu_monitor) {
+            auto proxy = backend->monitor();
+            r.monitor_checks++;
+            // Monitor values are in scaled units and never certify a result. A
+            // bounded full-check cadence protects scaling, limits and certificates.
+            bool full_check = r.iterations >= next_host_check || !std::isfinite(proxy) ||
+                              proxy <= 10 * o.tol || backend->restart_requested() ||
+                              r.iterations >= o.iteration_limit || elapsed(start) >= o.time_limit ||
+                              (o.polishing && r.iterations >= next_polish);
+            if (!full_check) {
+                r.skipped_candidate_checks++;
+                r.verification_seconds += elapsed(tick);
+                continue;
+            }
+            next_host_check = r.iterations + std::max<int64_t>(1000, o.check_every);
+        }
+        r.host_candidate_checks++;
         tick = Clock::now();
         std::vector<double> cx, cy, ax, ay;
         backend->candidates(cx, cy, ax, ay);

@@ -9,3 +9,5 @@ All coefficients are synthetic and illustrative, not MRPL data.
 - `toy.lp`: tiny LP with objective 2 for a fast installation check.
 
 `generate.py` reconstructs the synthetic cases. `warm_resolve.py` increases blending demand by 5%, solves cold and warm, verifies their objective agreement and saves both full outputs. The report makes no promise that a warm start is always faster.
+
+Additional submission cases: `coupled_dispatch.json` uses symmetric off-diagonal quadratic costs; `integer_dispatch.json` demonstrates convex MIQP; `production.json` links production and inventory across periods. All are illustrative synthetic data, not MRPL measurements.

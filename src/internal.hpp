@@ -16,9 +16,12 @@ struct Prepared {
     std::vector<double> restore_y(const std::vector<double> &, size_t original_rows) const;
 };
 Prepared prepare(const Model &, const Options &);
+int64_t simplex_row_limit();
+Result solve_simplex(const Model &, const Options &);
 double power_norm(const Sparse &, int iterations);
 Model dual_feasibility_model(const Model &);
 int add_binary_cuts(Model &, int limit);
+int add_mir_cuts(Model &, int limit);
 Model distance_projection_model(const Model &, const std::vector<double> &target);
 class PrimalWeightController {
     double integral = 0, previous = 0;
@@ -36,6 +39,9 @@ class IterationBackend {
     }
     virtual bool restart_requested() const {
         return false;
+    }
+    virtual double monitor() {
+        return inf;
     }
     virtual void candidates(std::vector<double> &x, std::vector<double> &y, std::vector<double> &ax,
                             std::vector<double> &ay) = 0;

@@ -17,12 +17,15 @@ int main(int argc, char **argv) {
                    "--json-out result.json --warm-start result.json --threads 1 --verbose\n  "
                    "     --no-presolve --scaling-passes 5 --no-restart --no-adaptive\n       "
                    "--node-limit 10000 --mip-gap 1e-4 --check-every 100\n"
-                   "       --scaling ruiz|combined --method pdhg|halpern|rhpdhg|r2hpdhg\n"
+                   "       --scaling ruiz|combined --method "
+                   "auto|simplex|pdhg|halpern|rhpdhg|r2hpdhg\n"
                    "       --primal-weight displacement|pid --power-iterations 0 --polishing\n"
                    "       --cuda-graphs --gpu-indices auto|32|64 --matrix-precision fp64|mixed\n"
+                   "       --gpu-monitor --certificate-out certificate.json\n"
+                   "       --node-selection best-bound|depth-first|best-estimate\n"
                    "       --branching fractional|reliability --cuts\n       --primal-heuristic "
                    "repair|pump|rins|all\n"
-                   "       halpern: experimental CPU LP, requires --no-adaptive\n";
+                   "       halpern: experimental CPU/CUDA LP, requires --no-adaptive\n";
             return 0;
         }
         std::string cmd = argv[1];
@@ -37,26 +40,81 @@ int main(int argc, char **argv) {
         double parse_seconds =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - parse_start).count();
         if (cmd == "inspect" || cmd == "explain") {
-            nlohmann::json j = {{"name", m.name},
-                                {"type", m.is_mip()  ? "MILP"
-                                         : m.is_qp() ? "QP"
-                                                     : "LP"},
-                                {"rows", m.A.rows},
-                                {"columns", m.A.cols},
-                                {"nonzeros", m.A.value.size()},
-                                {"fingerprint", m.fingerprint()},
-                                {"gpu_storage_estimate_bytes",
-                                 48. * m.A.value.size() + 192. * (m.A.rows + m.A.cols + 2)}};
+            nlohmann::json j = {
+                {"name", m.name},
+                {"type", m.is_mip()  ? (m.is_qp() ? "MIQP" : "MILP")
+                         : m.is_qp() ? "QP"
+                                     : "LP"},
+                {"rows", m.A.rows},
+                {"columns", m.A.cols},
+                {"nonzeros", m.A.value.size()},
+                {"fingerprint", m.fingerprint()},
+                {"gpu_storage_estimate_bytes",
+                 48. * (m.A.value.size() + m.Q.value.size()) + 240. * (m.A.rows + m.A.cols + 2)}};
             if (cmd == "explain") {
-                j["method"] = m.is_mip()
-                                  ? "Best-bound branch-and-bound using NIRYUKTI PDHG relaxations"
-                              : m.is_qp() ? "PDHG with diagonal quadratic proximal step"
-                                          : "Restarted PDHG";
+                j["method"] =
+                    m.is_mip() ? "Best-bound branch-and-bound using NIRYUKTI PDHG relaxations"
+                    : m.is_qp()
+                        ? (!m.Q.value.empty() ? "Smooth primal-dual splitting with sparse Q*x"
+                                              : "PDHG with diagonal quadratic proximal step")
+                        : "Restarted PDHG";
                 j["gpu_suitability_heuristic"] =
                     m.A.value.size() >= 100000 ? "Worth measuring CPU/GPU crossover"
                                                : "Low: launch and transfer overhead may dominate";
-                j["verification"] = "Original-space feasibility, projected stationarity, "
-                                    "complementarity and separable Lagrangian bound";
+                j["verification"] =
+                    "Original-space feasibility, projected stationarity, complementarity and "
+                    "conservative relaxation bounds; MIP tree proof is not independently replayed";
+                int64_t integers = 0, transformed_rows = 0;
+                for (size_t v = 0; v < m.c.size(); ++v) {
+                    integers += m.types[v] != VarType::Continuous;
+                    transformed_rows +=
+                        std::isfinite(m.lb[v]) && std::isfinite(m.ub[v]) && m.lb[v] != m.ub[v];
+                }
+                for (size_t i = 0; i < m.rl.size(); ++i) {
+                    transformed_rows += std::isfinite(m.rl[i]);
+                    transformed_rows += std::isfinite(m.ru[i]) && m.ru[i] != m.rl[i];
+                }
+                std::vector<int64_t> parent(m.c.size());
+                for (size_t v = 0; v < parent.size(); ++v)
+                    parent[v] = v;
+                auto root = [&](int64_t v) {
+                    while (parent[v] != v) {
+                        parent[v] = parent[parent[v]];
+                        v = parent[v];
+                    }
+                    return v;
+                };
+                auto join = [&](int64_t a, int64_t b) {
+                    a = root(a);
+                    b = root(b);
+                    if (a != b)
+                        parent[b] = a;
+                };
+                for (int64_t i = 0; i < m.A.rows; ++i)
+                    for (auto k = m.A.ptr[i] + 1; k < m.A.ptr[i + 1]; ++k)
+                        join(m.A.index[m.A.ptr[i]], m.A.index[k]);
+                for (int64_t i = 0; i < m.Q.rows; ++i)
+                    for (auto k = m.Q.ptr[i]; k < m.Q.ptr[i + 1]; ++k)
+                        join(i, m.Q.index[k]);
+                int64_t components = 0;
+                for (size_t v = 0; v < parent.size(); ++v)
+                    components += root(v) == int64_t(v);
+                bool compact = !m.is_qp() && transformed_rows <= 512;
+                bool large = m.A.value.size() + m.Q.value.size() >= 100000;
+                j["structure"] = {
+                    {"integer_variables", integers},
+                    {"quadratic_nonzeros", m.Q.value.size()},
+                    {"variable_components", components},
+                    {"component_scope",
+                     "constraint and quadratic incidence; no automatic decomposition"},
+                    {"transformed_row_estimate", transformed_rows}};
+                j["recommended_configuration"] = {
+                    {"method", compact ? "auto" : "pdhg"},
+                    {"device", large && !compact ? "auto" : "cpu"},
+                    {"branching",
+                     m.is_mip() ? "reliability (opt-in; benchmark first)" : "not applicable"}};
+                j["advisor_scope"] =
+                    "Structural rule-based guidance, not a learned runtime prediction";
             }
             std::cout << j.dump(2) << '\n';
             return 0;
@@ -79,10 +137,25 @@ int main(int argc, char **argv) {
                 std::cout << result_json(m, r) << '\n';
                 return pass ? 0 : 2;
             }
+            auto declared_objective = r.accuracy.objective;
+            auto declared_status = r.status;
             r.accuracy = verify(m, r.x, r.y);
             bool pass =
                 r.accuracy.finite && r.accuracy.primal <= 1e-6 && r.accuracy.integrality <= 1e-6;
             bool optimal = pass && !m.is_mip() && r.accuracy.kkt <= 1e-6;
+            bool objective_matches =
+                !std::isfinite(declared_objective) ||
+                (r.accuracy.finite && std::abs(declared_objective - r.accuracy.objective) <=
+                                          1e-6 * (1 + std::abs(r.accuracy.objective)));
+            if (!objective_matches) {
+                pass = false;
+                optimal = false;
+                r.message = "Reported objective does not match independent calculation";
+            }
+            if (declared_status == "OPTIMAL" && !m.is_mip() && !optimal) {
+                pass = false;
+                r.message = "Claimed optimal solution fails independent KKT checks";
+            }
             r.status = optimal ? "VERIFIED_OPTIMAL"
                        : pass  ? "VERIFIED_FEASIBLE"
                                : "VERIFICATION_FAILED";
@@ -95,7 +168,7 @@ int main(int argc, char **argv) {
         if (cmd != "solve")
             throw std::runtime_error("Unknown command: " + cmd);
         Options o;
-        std::string output, warm;
+        std::string output, warm, certificate_output;
         bool allow_model_change = false;
         for (int i = 3; i < argc; i++) {
             std::string a = argv[i];
@@ -128,6 +201,8 @@ int main(int argc, char **argv) {
                 o.scaling = val();
             else if (a == "--method")
                 o.method = val();
+            else if (a == "--node-selection")
+                o.node_selection = val();
             else if (a == "--branching")
                 o.branching = val();
             else if (a == "--primal-weight")
@@ -136,6 +211,8 @@ int main(int argc, char **argv) {
                 o.power_iterations = std::stoi(val());
             else if (a == "--cuda-graphs")
                 o.cuda_graphs = true;
+            else if (a == "--gpu-monitor")
+                o.gpu_monitor = true;
             else if (a == "--gpu-indices")
                 o.gpu_indices = val();
             else if (a == "--matrix-precision")
@@ -148,6 +225,8 @@ int main(int argc, char **argv) {
                 o.cuts = true;
             else if (a == "--json-out" || a == "--solution-out")
                 output = val();
+            else if (a == "--certificate-out")
+                certificate_output = val();
             else if (a == "--warm-start")
                 warm = val();
             else if (a == "--allow-model-change")
@@ -180,9 +259,11 @@ int main(int argc, char **argv) {
                         {"scaling", o.scaling},
                         {"method", o.method},
                         {"branching", o.branching},
+                        {"node_selection", o.node_selection},
                         {"primal_weight", o.primal_weight},
                         {"power_iterations", o.power_iterations},
                         {"cuda_graphs", o.cuda_graphs},
+                        {"gpu_monitor", o.gpu_monitor},
                         {"gpu_indices", o.gpu_indices},
                         {"matrix_precision", o.matrix_precision},
                         {"polishing", o.polishing},
@@ -190,6 +271,19 @@ int main(int argc, char **argv) {
                         {"primal_heuristic", o.primal_heuristic},
                         {"restart", o.restart},
                         {"adaptive", o.adaptive}};
+        j["verification_evidence"] = {
+            {"model_fingerprint", m.fingerprint()},
+            {"tolerance", o.tol},
+            {"scope", m.is_mip() ? "incumbent feasibility; tree bound is solver telemetry"
+                                 : "original-space KKT and dual bound"},
+            {"independent_final_check", r.accuracy.finite},
+            {"tree_optimality_replayed", false}};
+        if (!certificate_output.empty()) {
+            std::ofstream cert(certificate_output);
+            if (!cert)
+                throw std::runtime_error("Cannot write certificate");
+            cert << j.dump(2) << '\n';
+        }
         if (!output.empty()) {
             std::ofstream f(output);
             if (!f)

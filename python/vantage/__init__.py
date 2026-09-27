@@ -17,9 +17,9 @@ def solve(path, *, device='auto', tol=1e-6, time_limit=60, threads=1, warm_start
           allow_model_change=False, binary=None, iterations=100000, method='pdhg',
           scaling='ruiz', adaptive=True, branching='fractional', primal_weight='displacement',
           power_iterations=0, polishing=False, cuts=False, primal_heuristic="repair", cuda_graphs=False,
-          gpu_indices="auto", matrix_precision="fp64"):
+          gpu_indices="auto", matrix_precision="fp64", gpu_monitor=False, node_selection="best-bound"):
     command=[_binary(binary),'solve',str(path),'--device',device,'--tol',str(tol),
-             '--time-limit',str(time_limit),'--threads',str(threads),'--iterations',str(iterations)]
+             '--time-limit',str(time_limit),'--threads',str(threads),'--iterations',str(iterations),'--node-selection',node_selection]
     if method!='pdhg':command+=['--method',method]
     if scaling!='ruiz':command+=['--scaling',scaling]
     if branching!='fractional':command+=['--branching',branching]
@@ -28,6 +28,7 @@ def solve(path, *, device='auto', tol=1e-6, time_limit=60, threads=1, warm_start
     if polishing:command+=['--polishing']
     if cuts:command+=['--cuts']
     if primal_heuristic!='repair':command+=['--primal-heuristic',primal_heuristic]
+    if gpu_monitor:command += ["--gpu-monitor"]
     if cuda_graphs:command += ["--cuda-graphs"]
     if gpu_indices!="auto":command += ["--gpu-indices",gpu_indices]
     if matrix_precision!="fp64":command += ["--matrix-precision",matrix_precision]

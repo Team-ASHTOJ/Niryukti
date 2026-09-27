@@ -26,7 +26,7 @@ struct Model {
     std::string name = "model";
     Sparse A;
     Sparse Q; // Additional symmetric quadratic matrix; q retains the diagonal shorthand.
-    std::vector<double> c, q, lb, ub, rl, ru; // q is the diagonal of Q; canonical minimization.
+    std::vector<double> c, q, lb, ub, rl, ru; // q adds diagonal terms to Q; canonical minimization.
     std::vector<VarType> types;
     std::vector<std::string> names, row_names;
     double offset = 0, sense = 1; // output objective = sense * canonical objective
@@ -49,9 +49,9 @@ struct Options {
     int power_iterations = 0;
     bool polishing = false;
     bool cuts = false;
-    bool cuda_graphs = false;
+    bool cuda_graphs = false, gpu_monitor = false;
     std::string gpu_indices = "auto", matrix_precision = "fp64";
-    std::string primal_heuristic = "repair";
+    std::string primal_heuristic = "repair", node_selection = "best-bound";
 };
 struct Accuracy {
     double objective = inf, primal = inf, dual = inf, gap = inf, kkt = inf, integrality = inf;
@@ -85,9 +85,12 @@ struct Result {
     int64_t weight_updates = 0, polishing_iterations = 0, polishing_attempts = 0;
     double operator_norm_estimate = 0;
     int64_t cuts_added = 0;
+    int64_t monitor_checks = 0, host_candidate_checks = 0, skipped_candidate_checks = 0;
     int gpu_index_bits = 0;
     bool graph_execution = false;
     std::string matrix_precision = "fp64";
+    std::string method_selected, device_reason;
+    double estimated_gpu_bytes = 0;
     int64_t pump_rounds = 0, rins_calls = 0, heuristic_nodes = 0;
 };
 Model read_model(const std::string &path);

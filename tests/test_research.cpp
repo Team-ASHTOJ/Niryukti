@@ -1,4 +1,5 @@
 #include "../src/internal.hpp"
+#include <array>
 #include <iostream>
 #include <random>
 #include <stdexcept>
@@ -167,9 +168,243 @@ void sparse_quadratic() {
     }
     require(rejected, "asymmetric sparse Q rejected");
 }
+void quadratic_extensions() {
+    auto m = model(2, 1, {{0, 0, 1}, {0, 1, 1}});
+    m.lb = {0, 0};
+    m.ub = {3, 3};
+    m.rl = {2.5};
+    m.ru = {inf};
+    m.c = {-2, -3};
+    m.Q = Sparse::build(2, 2, {{0, 0, 2}, {0, 1, 1}, {1, 0, 1}, {1, 1, 2}});
+    m.types.assign(2, VarType::Integer);
+    double oracle = inf;
+    for (int x = 0; x <= 3; ++x)
+        for (int y = 0; y <= 3; ++y) {
+            auto a = verify(m, {double(x), double(y)}, {0});
+            if (a.primal == 0)
+                oracle = std::min(oracle, a.objective);
+        }
+    for (auto branching : {"fractional", "reliability"}) {
+        Options o;
+        o.device = "cpu";
+        o.branching = branching;
+        o.primal_heuristic = "all";
+        o.time_limit = 5;
+        auto r = solve(m, o);
+        require(r.status == "OPTIMAL", "MIQP branch-and-bound");
+        near(r.accuracy.objective, oracle, 1e-5);
+        require(r.best_bound <= oracle + 1e-9, "MIQP interval lower bound");
+    }
+    m.types.assign(2, VarType::Continuous);
+    m.lb[0] = m.ub[0] = 1;
+    auto original = solve(m, Options{});
+    require(original.status == "OPTIMAL", "cross-term fixed variable substitution");
+    near(original.x[0], 1);
+    require(original.removed_columns > 0, "full Q fixed column removed");
+    Options o;
+    o.presolve = false;
+    o.scaling_passes = 0;
+    auto plain = solve(m, o);
+    require(plain.status == "OPTIMAL", "unscaled full Q solve");
+    near(plain.accuracy.objective, original.accuracy.objective, 1e-5);
+    // Every independently evaluated point gives a bound below the exact finite-box optimum.
+    m.lb = {0, 0};
+    m.ub = {3, 3};
+    m.rl = {-inf};
+    m.ru = {inf};
+    double optimum = -7. / 3.; // unconstrained Qx = -c gives x=1/3,y=4/3.
+    for (int k = 0; k < 20; ++k) {
+        std::vector<double> x = {double(k) / 7, 3 - double(k) / 7};
+        auto a = verify(m, x, {0});
+        require(a.lower_bound <= optimum + 1e-12, "QP affine bound sound");
+    }
+    m.Q = Sparse::build(2, 2, {{0, 0, 1}, {0, 1, 1}, {1, 0, 1}, {1, 1, 1}});
+    m.c = {-1, -1};
+    m.validate();
+    require(solve(m).status == "OPTIMAL", "singular PSD QP");
+    if (cuda_available()) {
+        Options g;
+        g.device = "cuda";
+        g.cuda_graphs = true;
+        g.gpu_monitor = true;
+        auto r = solve(m, g);
+        require(r.status == "OPTIMAL", "GPU monitored QP");
+        require(r.monitor_checks > 0, "device monitor exercised");
+        require(verify(m, r.x, r.y).kkt <= g.tol,
+                "monitor never substitutes for independent verifier");
+    }
+}
+void sparse_qp_recession_guard() {
+    auto m = model(1, 0, {});
+    m.lb = {-inf};
+    m.ub = {inf};
+    m.c = {-2};
+    m.Q = Sparse::build(1, 1, {{0, 0, 2}});
+    Options o;
+    auto r = solve(m, o);
+    require(r.status == "OPTIMAL", "sparse quadratic column is not linear unbounded ray");
+    near(r.x[0], 1, 1e-6);
+    near(r.accuracy.objective, -1, 1e-6);
+}
+void simplex_and_cuts() {
+    std::mt19937 generator(26119);
+    for (int trial = 0; trial < 40; ++trial) {
+        std::vector<Entry> entries;
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 2; ++j)
+                entries.push_back({i, j, double(int(generator() % 9) - 4)});
+        auto m = model(2, 3, entries);
+        m.lb = {0, 0};
+        m.ub = {4, 4};
+        m.c = {double(int(generator() % 7) - 3), double(int(generator() % 7) - 3)};
+        auto activity = m.A.multiply({1, 2});
+        for (int i = 0; i < 3; ++i)
+            m.ru[i] = activity[i] + .5;
+        std::vector<std::array<double, 3>> lines = {
+            {{1, 0, 0}}, {{0, 1, 0}}, {{1, 0, 4}}, {{0, 1, 4}}};
+        for (int i = 0; i < 3; ++i) {
+            double a = 0, b = 0;
+            for (auto k = m.A.ptr[i]; k < m.A.ptr[i + 1]; ++k)
+                (m.A.index[k] ? b : a) = m.A.value[k];
+            lines.push_back({a, b, m.ru[i]});
+        }
+        double oracle = inf;
+        for (size_t i = 0; i < lines.size(); ++i)
+            for (size_t j = i + 1; j < lines.size(); ++j) {
+                auto a = lines[i], b = lines[j];
+                double determinant = a[0] * b[1] - a[1] * b[0];
+                if (std::abs(determinant) < 1e-12)
+                    continue;
+                std::vector<double> point = {(a[2] * b[1] - a[1] * b[2]) / determinant,
+                                             (a[0] * b[2] - a[2] * b[0]) / determinant};
+                auto v = verify(m, point, {0, 0, 0});
+                if (v.primal <= 1e-9)
+                    oracle = std::min(oracle, v.objective);
+            }
+        Options o;
+        o.method = "simplex";
+        auto r = solve(m, o);
+        require(r.status == "OPTIMAL", "simplex random bounded LP");
+        near(r.accuracy.objective, oracle, 1e-7);
+        require(r.accuracy.kkt <= o.tol, "simplex independently verified");
+    }
+    auto m = model(2, 1, {{0, 0, 2}, {0, 1, .5}});
+    m.lb = {0, 0};
+    m.ub = {3, 5};
+    m.ru = {2.5};
+    m.types[0] = VarType::Integer;
+    auto cuts = m;
+    require(add_mir_cuts(cuts, 4) > 0, "MIR generated");
+    for (int x = 0; x <= 3; ++x)
+        for (int y = 0; y <= 100; ++y) {
+            std::vector<double> point = {double(x), double(y) / 20};
+            auto before = verify(m, point, {0});
+            if (before.primal <= 1e-12)
+                require(verify(cuts, point, std::vector<double>(cuts.rl.size())).primal <= 1e-10,
+                        "MIR preserves feasible grid");
+        }
+    // Independent feasible-grid oracle checks MIR with both signs and shifted bounds.
+    for (int trial = 0; trial < 80; ++trial) {
+        auto base = model(3, 1,
+                          {{0, 0, (int(generator() % 17) - 8) / 4.},
+                           {0, 1, (int(generator() % 17) - 8) / 4.},
+                           {0, 2, (int(generator() % 17) - 8) / 4.}});
+        base.lb = {-2, -1, -.5};
+        base.ub = {2, 3, 2.5};
+        base.types = {VarType::Integer, VarType::Integer, VarType::Continuous};
+        double endpoint = (int(generator() % 31) - 15) / 4. + .125;
+        if (trial % 2)
+            base.rl[0] = endpoint;
+        else
+            base.ru[0] = endpoint;
+        auto tightened = base;
+        add_mir_cuts(tightened, 4);
+        for (int x = -2; x <= 2; ++x)
+            for (int y = -1; y <= 3; ++y)
+                for (int z = -2; z <= 10; ++z) {
+                    std::vector<double> point = {double(x), double(y), z / 4.};
+                    if (verify(base, point, {0}).primal <= 1e-12)
+                        require(verify(tightened, point, std::vector<double>(tightened.rl.size()))
+                                        .primal <= 1e-10,
+                                "MIR preserves independently enumerated mixed feasible points");
+                }
+    }
+    m.c = {-1, 0};
+    Options o;
+    o.method = "auto";
+    o.cuts = true;
+    o.branching = "reliability";
+    auto r = solve(m, o);
+    require(r.status == "OPTIMAL", "simplex-backed branch and cut");
+    near(r.accuracy.objective, -1);
+    for (const auto &policy : {"best-bound", "depth-first", "best-estimate"}) {
+        o.node_selection = policy;
+        r = solve(m, o);
+        require(r.status == "OPTIMAL", "node-selection policy verified");
+        near(r.accuracy.objective, -1);
+    }
+    auto cycling = model(4, 3,
+                         {{0, 0, .5},
+                          {0, 1, -5.5},
+                          {0, 2, -2.5},
+                          {0, 3, 9},
+                          {1, 0, .5},
+                          {1, 1, -1.5},
+                          {1, 2, -.5},
+                          {1, 3, 1},
+                          {2, 0, 1}});
+    cycling.lb = {0, 0, 0, 0};
+    cycling.ub = {inf, inf, inf, inf};
+    cycling.ru = {0, 0, 1};
+    cycling.c = {-10, 57, 9, 24};
+    o.method = "simplex";
+    o.presolve = false;
+    o.scaling_passes = 0;
+    auto cycled = solve(cycling, o);
+    require(cycled.status == "OPTIMAL", "Bland fallback terminates classical cycling LP");
+    near(cycled.accuracy.objective, -1, 1e-7);
+    o.presolve = true;
+    o.scaling_passes = 5;
+    auto bad = model(2, 2, {{0, 0, 1}, {0, 1, 1}, {1, 0, 1}, {1, 1, 1}});
+    bad.lb = {0, 0};
+    bad.ub = {10, 10};
+    bad.rl = {3, -inf};
+    bad.ru = {inf, 1};
+    o.method = "simplex";
+    r = solve(bad, o);
+    require(r.status == "INFEASIBLE", "simplex Farkas proof");
+    require(Verifier(bad).infeasibility_bound(r.infeasibility_ray) > 0,
+            "simplex ray independently verified");
+}
 void gpu_execution() {
     if (!cuda_available())
         return;
+    {
+        auto nonexact = model(2, 2, {{0, 0, .1}, {0, 1, .3}, {1, 0, std::sqrt(2.)}, {1, 1, -.2}});
+        nonexact.lb = {0, 0};
+        nonexact.ub = {5, 5};
+        nonexact.c = {-1, -.7};
+        nonexact.ru = {1, 2};
+        Options exact;
+        exact.device = "cpu";
+        auto reference = solve(nonexact, exact);
+        require(reference.status == "OPTIMAL", "nonexact matrix reference converges");
+        Options mixed;
+        mixed.device = "cuda";
+        mixed.matrix_precision = "mixed";
+        mixed.cuda_graphs = true;
+        mixed.gpu_monitor = true;
+        auto r = solve(nonexact, mixed);
+        require(r.status == "OPTIMAL", "nonexact mixed GPU solve converges");
+        require(verify(nonexact, r.x, r.y).kkt <= mixed.tol,
+                "FP64 verification controls mixed GPU optimality");
+        near(r.accuracy.objective, reference.accuracy.objective, 1e-5);
+        mixed.tol = 1e-10;
+        mixed.iteration_limit = 1000;
+        auto strict = solve(nonexact, mixed);
+        require(strict.status != "OPTIMAL" || verify(nonexact, strict.x, strict.y).kkt <= mixed.tol,
+                "mixed precision may reach a limit but cannot fake strict optimality");
+    }
     auto m = model(2, 2, {{0, 0, 1}, {0, 1, 2}, {1, 0, -1}, {1, 1, 1}});
     m.c = {1, -2};
     m.rl = {-1, -2};
@@ -205,6 +440,7 @@ void gpu_execution() {
                 cuda_backend(m, {0, 0}, {0, 0}, false, false, 0, false, true, width, precision);
             cpu->advance(30, .1, .1);
             gpu->advance(30, .1, .1);
+            require(std::isfinite(gpu->monitor()), "device scalar diagnostics finite");
             std::vector<double> x, y, ax, ay, gx, gy, gax, gay;
             cpu->candidates(x, y, ax, ay);
             gpu->candidates(gx, gy, gax, gay);
@@ -488,6 +724,9 @@ int main() {
         halpern();
         gpu_execution();
         sparse_quadratic();
+        quadratic_extensions();
+        sparse_qp_recession_guard();
+        simplex_and_cuts();
         scaling();
         enhanced_first_order();
         mip_research();

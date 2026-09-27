@@ -6,6 +6,9 @@ namespace vantage {
 namespace {
 struct Node {
     std::vector<double> lb, ub, x, y;
+    std::vector<int64_t> changed;
+    std::vector<double> changed_lb, changed_ub;
+    double estimate = -inf;
     double bound = -inf;
     int depth = 0;
     int64_t branch_variable = -1;
@@ -108,18 +111,35 @@ bool propagate(const Model &m, Node &node, int64_t &tightened) {
 }
 
 struct Compare {
+    std::string policy = "best-bound";
     bool operator()(const Node &a, const Node &b) const {
+        if (policy == "depth-first" && a.depth != b.depth)
+            return a.depth < b.depth;
+        if (policy == "best-estimate" && a.estimate != b.estimate)
+            return a.estimate > b.estimate;
         return a.bound > b.bound;
+    }
+};
+struct NodeQueue : std::priority_queue<Node, std::vector<Node>, Compare> {
+    using std::priority_queue<Node, std::vector<Node>, Compare>::priority_queue;
+    double lower_bound() const {
+        double bound = inf;
+        for (const auto &node : this->c)
+            bound = std::min(bound, node.bound);
+        return bound;
     }
 };
 } // namespace
 Result solve_mip(const Model &original, const Options &options) {
     auto start = Clock::now();
     Result out;
+    out.method_selected = options.cuts ? "branch-and-bound-with-root-cuts" : "branch-and-bound";
     out.status = "NODE_LIMIT";
     Model relaxation = original;
-    if (options.cuts)
+    if (options.cuts) {
         out.cuts_added = add_binary_cuts(relaxation, 64);
+        out.cuts_added += add_mir_cuts(relaxation, 64);
+    }
     std::fill(relaxation.types.begin(), relaxation.types.end(), VarType::Continuous);
     Node root;
     root.lb = original.lb;
@@ -139,7 +159,26 @@ Result solve_mip(const Model &original, const Options &options) {
                 return out;
             }
         }
-    std::priority_queue<Node, std::vector<Node>, Compare> queue;
+    const auto base_lb = root.lb, base_ub = root.ub;
+    auto pack = [&](Node &node, bool preserve_warm = false) {
+        node.changed.clear();
+        node.changed_lb.clear();
+        node.changed_ub.clear();
+        for (size_t j = 0; j < base_lb.size(); ++j)
+            if (node.lb[j] != base_lb[j] || node.ub[j] != base_ub[j]) {
+                node.changed.push_back(j);
+                node.changed_lb.push_back(node.lb[j]);
+                node.changed_ub.push_back(node.ub[j]);
+            }
+        std::vector<double>().swap(node.lb);
+        std::vector<double>().swap(node.ub);
+        if (base_lb.size() > 10000 && !preserve_warm) {
+            std::vector<double>().swap(node.x);
+            std::vector<double>().swap(node.y);
+        }
+    };
+    NodeQueue queue(Compare{options.node_selection});
+    pack(root, true);
     queue.push(root);
     double incumbent = inf, closed = inf, unresolved = inf;
     int64_t unresolved_count = 0;
@@ -188,6 +227,12 @@ Result solve_mip(const Model &original, const Options &options) {
         }
         Node node = queue.top();
         queue.pop();
+        node.lb = base_lb;
+        node.ub = base_ub;
+        for (size_t k = 0; k < node.changed.size(); ++k) {
+            node.lb[node.changed[k]] = node.changed_lb[k];
+            node.ub[node.changed[k]] = node.changed_ub[k];
+        }
         if (cutoff(node.bound)) {
             closed = std::min(closed, node.bound);
             continue;
@@ -217,6 +262,14 @@ Result solve_mip(const Model &original, const Options &options) {
         out.verification_seconds += r.verification_seconds;
         out.backend = r.backend;
         out.device_name = r.device_name;
+        out.device_reason = r.device_reason;
+        out.estimated_gpu_bytes = r.estimated_gpu_bytes;
+        out.monitor_checks += r.monitor_checks;
+        out.host_candidate_checks += r.host_candidate_checks;
+        out.skipped_candidate_checks += r.skipped_candidate_checks;
+        out.graph_execution = r.graph_execution;
+        out.gpu_index_bits = r.gpu_index_bits;
+        out.matrix_precision = r.matrix_precision;
         if (options.branching == "reliability" && node.branch_variable >= 0 &&
             r.status == "OPTIMAL") {
             auto &cost = node.branch_up ? up[node.branch_variable] : down[node.branch_variable];
@@ -443,15 +496,26 @@ Result solve_mip(const Model &original, const Options &options) {
             r.status == "OPTIMAL" ? r.accuracy.objective : inf;
         left.ub[branch] = std::floor(value);
         right.lb[branch] = std::ceil(value);
-        if (left.lb[branch] <= left.ub[branch])
+        const double fallback = std::max(1., std::abs(original.c[branch]));
+        left.estimate = r.accuracy.objective +
+                        (down.empty() ? fallback * left.branch_distance
+                                      : down[branch].predict(left.branch_distance, fallback));
+        right.estimate = r.accuracy.objective +
+                         (up.empty() ? fallback * right.branch_distance
+                                     : up[branch].predict(right.branch_distance, fallback));
+        if (left.lb[branch] <= left.ub[branch]) {
+            pack(left);
             queue.push(std::move(left));
-        if (right.lb[branch] <= right.ub[branch])
+        }
+        if (right.lb[branch] <= right.ub[branch]) {
+            pack(right);
             queue.push(std::move(right));
+        }
     }
     out.nodes_remaining = queue.size() + unresolved_count;
     out.best_bound = std::min(closed, unresolved);
     if (!queue.empty())
-        out.best_bound = std::min(out.best_bound, queue.top().bound);
+        out.best_bound = std::min(out.best_bound, queue.lower_bound());
     if (std::isfinite(incumbent)) {
         out.best_bound = std::min(out.best_bound, incumbent);
         out.mip_gap = std::isfinite(out.best_bound) ? std::max(0., incumbent - out.best_bound) /

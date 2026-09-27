@@ -1,0 +1,9 @@
+.git
+.venv
+build*
+results
+datasets/public
+datasets/refinery_large.*
+dashboard/browser-tests/node_modules
+dashboard/browser-tests/test-results
+**/__pycache__

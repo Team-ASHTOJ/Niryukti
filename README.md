@@ -2,9 +2,9 @@
 
 **Independent Sparse Optimization Engine**
 
-An independent sparse optimization engine for SIH26119, built in C++20 with an optional CUDA backend. The first prototype solves LPs, separable convex QPs, and small MILPs using its own numerical algorithms. No existing optimization solver is used to solve a NIRYUKTI model.
+An independent sparse optimization engine for SIH26119, built in C++20 with an optional CUDA backend. The first prototype solves LPs, supported sparse convex QPs, small MILPs and convex MIQPs using its own numerical algorithms. No existing optimization solver is used to solve a NIRYUKTI model.
 
-**Research prototype:** numerical correctness is tested on representative cases; industrial robustness, general convex QP support, and competitive large-scale MILP performance remain development work. The name does not imply support for general nonconvex global optimization.
+**Research prototype:** numerical correctness is tested on representative cases; industrial robustness, unrestricted large sparse PSD validation, and competitive large-scale MILP performance remain development work. The name does not imply support for general nonconvex global optimization.
 
 ## Dashboard
 
@@ -43,17 +43,17 @@ Requirements: CMake ≥3.24, a C++20 compiler, Python ≥3.10 for scripts. CUDA 
 |---|---|
 | Independent solver core | Own PDHG updates, preprocessing, scaling, verification, and branch-and-bound |
 | Sparse matrices | COO construction with duplicate aggregation; CSR and explicit sparse transpose; 64-bit offsets and indices |
-| CPU and CUDA | Same algorithm; OpenMP CPU loops; cuSPARSE GPU SpMV and fused update/averaging kernels |
-| LP | Box-constrained interval-row PDHG, adaptive trial-step control, weighted averaging, adaptive restart and primal/dual weighting |
-| Convex QP | Nonnegative **diagonal Q**, using an exact separable proximal update |
-| MILP | Best-bound search, most-fractional branching, conservative integer-bound propagation, warm relaxations, rounding/repair, incumbent and global gap |
+| CPU and CUDA | Same algorithm; OpenMP CPU loops; Eigen sparse numerical basis LU; cuSPARSE GPU SpMV and fused update/averaging kernels |
+| LP | Adaptive restarted PDHG; opt-in Halpern/reflected methods; compact CPU revised primal simplex (4096 transformed-row guard; 512 with the optional dense kernel) |
+| Convex QP / MIQP | Diagonal proximal updates; symmetric sparse convex Q via smooth splitting; QP relaxations and conservative minorant bounds for MIQP |
+| MILP | Bound-delta nodes, selectable search policies, opt-in reliability branching, root MIR/cover/clique cuts, pump/RINS; conservative bounds and incumbent gap |
 | Preprocessing | Fixed-variable and bounded isolated-column elimination, empty rows, row-activity infeasibility checks, reversible reconstruction |
 | Scaling | Iterative diagonal equilibration with original-space verification |
-| Input | MPS linear/integer sections and ranges; diagonal `QMATRIX`/`QUADOBJ`; documented LP text subset; native sparse JSON |
+| Input | MPS linear/integer sections and ranges; symmetric/triangular `QMATRIX`/`QUADOBJ`; documented LP text subset; sparse JSON; supported continuous QPLIB |
 | Verification | Original objective, row/bound feasibility, integrality, projected stationarity, complementarity, and Lagrangian lower bound |
 | Infeasibility certificates | Independently verified box/row Farkas rays, saved as JSON and replayable through `verify` |
 | API and CLI | C++ library, Python subprocess API, solve/inspect/explain/verify/convert/devices commands |
-| Demonstration | Synthetic refinery blending LP, refinery scheduling MILP, supply-chain MILP, and power-dispatch QP |
+| Demonstration | Synthetic refinery blending LP, refinery scheduling MILP, supply-chain MILP, production planning LP, coupled power-dispatch QP and integer-dispatch MIQP |
 | Benchmarks | External HiGHS adapter, CPU/CUDA comparisons, raw runs including failures, checksums, offline HTML and CSV |
 
 ## CLI examples
@@ -129,3 +129,27 @@ See [architecture](docs/architecture.md), [mathematics](docs/algorithms.md), [fo
 ## Documentation for development and submissions
 
 The [documentation index](docs/README.md) links the [development log](docs/development_log.md), mathematical explanations, validation records and a [presentation/submission evidence guide](docs/presentation_evidence.md). Preliminary experiments are labeled separately from reproducible benchmark results.
+
+## Submission round and reproducibility
+
+Current scope, integration and remaining algorithms: [27 September engineering record](docs/submission_round_20260927.md).
+
+```bash
+./build/vantage solve datasets/adlittle.mps --device cpu --method auto
+./build/vantage solve examples/coupled_dispatch.json --device cuda --gpu-monitor
+./build/vantage solve examples/integer_dispatch.json --certificate-out /tmp/miqp.json
+./build/vantage verify examples/integer_dispatch.json /tmp/miqp.json
+python3 benchmark/download_public.py --suite netlib
+python3 benchmark/download_public.py --suite qplib
+./scripts/reproduce_submission.sh
+# Optional baseline: VANTAGE_BENCH_PYTHON=.venv/bin/python VANTAGE_REPRO_SOLVERS=cpu,highs ./scripts/reproduce_submission.sh
+
+docker build -f Dockerfile.cpu -t vantage:cpu .
+docker run --rm vantage:cpu solve examples/production.json --method auto
+docker compose up --build
+# CUDA image requires a compatible NVIDIA driver/container toolkit.
+docker build -f Dockerfile.cuda -t vantage:cuda .
+docker run --gpus all --rm vantage:cuda devices
+```
+
+Dockerfiles provide reproducible build recipes; image validation and actual measured campaigns are recorded separately. `auto` selects compact CPU simplex where supported; otherwise it retains PDHG. Root cuts and new CUDA monitoring remain opt-in. Full tree checkpoint/resume, barrier/IPM, dual simplex, GPU-batched branching, conflict learning and HIP are not implemented.

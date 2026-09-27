@@ -1,0 +1,7 @@
+{
+  "project": "Eigen",
+  "version": "5.0.0",
+  "source": "https://gitlab.com/libeigen/eigen/-/archive/5.0.0/eigen-5.0.0.tar.gz",
+  "archive_sha256": "315c881e19e17542a7d428c5aa37d113c89b9500d350c433797b730cd449c056",
+  "scope": "Eigen numerical headers only; unsupported optimization modules are excluded"
+}

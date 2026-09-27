@@ -1,0 +1,8 @@
+services:
+  studio:
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    entrypoint: ["python3", "dashboard/server.py", "--host", "0.0.0.0", "--port", "8080"]
+    ports:
+      - "127.0.0.1:8080:8080"

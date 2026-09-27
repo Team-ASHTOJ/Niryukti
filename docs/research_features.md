@@ -2,6 +2,8 @@
 
 This records the implemented portions from the supplied research brief. It does **not** represent completion of the full heterogeneous-solver roadmap or a reproduction of every cited solver. New solver features are opt-in. Production still uses independently written numerical code and no external optimization engine.
 
+Current extensions and measured validation are tracked in [the September submission record](submission_round_20260927.md). Earlier limitations below describe the previous research snapshot unless explicitly updated.
+
 ## Implemented and exposed
 
 | Change | Entry point | Verification |
@@ -87,8 +89,8 @@ Primary sources were checked on 2026-09-27. The table distinguishes implemented 
 | [RINS](https://link.springer.com/article/10.1007/s10107-004-0518-7) | Implemented bounded sub-MIP neighborhoods fixing integer coordinates where the relaxation and incumbent agree. Recursive RINS is disabled, the global node budget is shared, and neighborhood bounds never prune the main tree. |
 | [Parallel revised dual simplex](https://webhomes.maths.ed.ac.uk/hall/HuHa13/) | Revised simplex remains pending; needs basis state, stable updates, pricing and numerical recovery before parallelization. |
 | [HiGHS](https://highs.dev/) and [cuOpt portfolio settings](https://docs.nvidia.com/cuopt/user-guide/latest/convex-settings.html) | Multiple methods motivate explicit method selection. A concurrent portfolio requires multiple validated production engines; not implemented. |
-| [CUDA Graphs](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cuda-graphs.html) | Capture remains pending; must preserve adaptive accept/reject state and interruption boundaries. |
-| [cuSPARSE](https://docs.nvidia.com/cuda/cusparse/) | Existing sparse products retained. Index-width changes, mixed precision and new SpMV APIs require toolkit checks and hardware validation. |
+| [CUDA Graphs](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cuda-graphs.html) | Opt-in graph execution is implemented and tested on CUDA; broader performance validation is reported separately. |
+| [cuSPARSE](https://docs.nvidia.com/cuda/cusparse/) | Existing sparse products retained. 32/64-bit indices and experimental mixed matrix precision are implemented. SpMVOp integration remains pending. |
 | [Stream-ordered allocator](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html) | Persistent workspace/pools remain pending; ownership must span repeated relaxations safely. |
 | [cuDSS](https://docs.nvidia.com/cuda/cudss/) | Possible factorization infrastructure for future IPM, not an implemented barrier engine. |
 | [hipSPARSE](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/index.html) | HIP backend remains pending; requires AMD hardware coverage and a backend abstraction beyond conditional CUDA calls. |
@@ -105,4 +107,4 @@ The first acceptance-only fix exposed a real backtracking stall in the pre-exist
 
 The original binary was retained under `results/research-baseline/vantage`. Serial comparison artifacts are under `results/research-serial-{baseline,default,combined,halpern,reliability}/`; each has a manifest, per-run raw outputs and HTML report. These local results are ignored by git. A compact measured summary is in `research_validation.md`.
 
-Do not promote experiments to defaults based on this small suite. GPU extensions, large public benchmark coverage, the full reversible presolver, sparse-Q support, barrier, simplex, MIR/GMI cuts, conflict analysis, HIP and the concurrent portfolio remain unfinished.
+Do not promote experiments to defaults based on this small suite. Current CUDA extensions, sparse Q/MIQP, compact primal simplex and restricted MIR cuts are covered in the September record. Barrier, dual simplex, unrestricted presolve, GMI, conflict analysis, HIP and concurrent portfolios remain unfinished.

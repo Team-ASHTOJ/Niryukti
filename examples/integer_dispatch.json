@@ -1,0 +1,61 @@
+{
+  "name": "synthetic_integer_dispatch",
+  "sense": "min",
+  "variables": [
+    {
+      "name": "unit_A",
+      "lb": 0,
+      "ub": 8,
+      "type": "integer"
+    },
+    {
+      "name": "unit_B",
+      "lb": 0,
+      "ub": 8,
+      "type": "integer"
+    }
+  ],
+  "objective": {
+    "linear": [
+      1,
+      1.5
+    ],
+    "quadratic_diagonal": [
+      0.5,
+      0.8
+    ],
+    "quadratic_sparse": [
+      [
+        0,
+        0,
+        0.2
+      ],
+      [
+        1,
+        1,
+        0.2
+      ],
+      [
+        0,
+        1,
+        -0.2
+      ],
+      [
+        1,
+        0,
+        -0.2
+      ]
+    ]
+  },
+  "constraints": [
+    {
+      "name": "demand",
+      "lb": 9,
+      "ub": 9,
+      "coefficients": {
+        "unit_A": 1,
+        "unit_B": 1
+      }
+    }
+  ]
+}

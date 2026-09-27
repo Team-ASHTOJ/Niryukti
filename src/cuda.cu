@@ -28,6 +28,21 @@ template <class T> struct Buffer {
         if (p)
             cudaFree(p);
     }
+    Buffer(Buffer &&other) noexcept : p(other.p), n(other.n) {
+        other.p = nullptr;
+        other.n = 0;
+    }
+    Buffer &operator=(Buffer &&other) noexcept {
+        if (this != &other) {
+            if (p)
+                cudaFree(p);
+            p = other.p;
+            n = other.n;
+            other.p = nullptr;
+            other.n = 0;
+        }
+        return *this;
+    }
     Buffer(const Buffer &) = delete;
     Buffer &operator=(const Buffer &) = delete;
     void upload(const std::vector<T> &v) {
@@ -290,6 +305,82 @@ __global__ void commit_dual(int64_t n, double *y, const double *trial, double *a
         }
     }
 }
+// Scaled-space control diagnostics. This never certifies optimality; the
+// independent original-model verifier remains the final acceptance authority.
+__device__ double block_max(double value) {
+    __shared__ double scratch[256];
+    int t = threadIdx.x;
+    scratch[t] = value;
+    __syncthreads();
+    for (int stride = 128; stride; stride /= 2) {
+        if (t < stride)
+            scratch[t] = fmax(scratch[t], scratch[t + stride]);
+        __syncthreads();
+    }
+    double result = scratch[0];
+    __syncthreads();
+    return result;
+}
+__global__ void monitor_partial(int64_t n, int64_t rows, const double *x, const double *y,
+                                const double *ax, const double *aty, const double *qx,
+                                const double *c, const double *q, const double *lb,
+                                const double *ub, const double *rl, const double *ru, double cscale,
+                                double *partial) {
+    auto i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+    double primal = 0, dual = 0, objective = 0, complement = 0, bad = 0;
+    if (i < n) {
+        double g = c[i] + q[i] * x[i] + aty[i] + (qx ? qx[i] : 0);
+        primal = fmax(0., fmax(lb[i] - x[i], x[i] - ub[i])) / (1 + fabs(x[i]));
+        dual = fabs(fmin(x[i] - lb[i], fmax(x[i] - ub[i], g))) / cscale;
+        objective = c[i] * x[i] + .5 * q[i] * x[i] * x[i] + (qx ? .5 * qx[i] * x[i] : 0);
+        if (g > 0 && isfinite(lb[i]))
+            complement += fabs(g * (x[i] - lb[i]));
+        if (g < 0 && isfinite(ub[i]))
+            complement += fabs(g * (ub[i] - x[i]));
+        bad = (!isfinite(x[i]) || !isfinite(g) || !isfinite(objective));
+    }
+    if (i < rows) {
+        if (isfinite(rl[i]))
+            primal = fmax(primal, fmax(0., rl[i] - ax[i]) / (1 + fabs(rl[i])));
+        if (isfinite(ru[i]))
+            primal = fmax(primal, fmax(0., ax[i] - ru[i]) / (1 + fabs(ru[i])));
+        if (y[i] != 0) {
+            double endpoint = y[i] > 0 ? ru[i] : rl[i];
+            if (isfinite(endpoint))
+                complement += fabs(y[i] * (endpoint - ax[i]));
+            else
+                dual = fmax(dual, fabs(y[i]));
+        }
+        bad = fmax(bad, double(!isfinite(ax[i]) || !isfinite(y[i])));
+    }
+    double p = block_max(primal), d = block_max(dual), o = block_sum(objective),
+           v = block_sum(complement), b = block_max(bad);
+    if (threadIdx.x == 0) {
+        auto k = 5 * blockIdx.x;
+        partial[k] = p;
+        partial[k + 1] = d;
+        partial[k + 2] = o;
+        partial[k + 3] = v;
+        partial[k + 4] = b;
+    }
+}
+__global__ void monitor_reduce(int64_t count, const double *partial, double *result) {
+    double p = 0, d = 0, o = 0, v = 0, b = 0;
+    for (int64_t k = threadIdx.x; k < count; k += blockDim.x) {
+        p = fmax(p, partial[5 * k]);
+        d = fmax(d, partial[5 * k + 1]);
+        o += partial[5 * k + 2];
+        v += partial[5 * k + 3];
+        b = fmax(b, partial[5 * k + 4]);
+    }
+    p = block_max(p);
+    d = block_max(d);
+    o = block_sum(o);
+    v = block_sum(v);
+    b = block_max(b);
+    if (threadIdx.x == 0)
+        result[0] = b ? INFINITY : fmax(fmax(p, d), v / (1 + fabs(o)));
+}
 class CudaBackend final : public IterationBackend {
     Stream stream;
     Handle handle;
@@ -309,6 +400,11 @@ class CudaBackend final : public IterationBackend {
     int empty_chunks = 0;
     Vector vx, vy, vax, vaty;
     std::unique_ptr<Buffer<char>> workspace;
+    std::unique_ptr<Buffer<char>> monitor_workspace;
+    Buffer<double> monitor_ax, monitor_aty, monitor_qx, monitor_partials, monitor_scalar;
+    std::unique_ptr<Vector> monitor_x, monitor_y, monitor_aout, monitor_atout, monitor_qout;
+    double monitor_cscale = 1;
+    bool monitor_initialized = false;
 
   public:
     CudaBackend(const Model &m, const std::vector<double> &px, const std::vector<double> &py,
@@ -376,6 +472,84 @@ class CudaBackend final : public IterationBackend {
         check(cudaDeviceSynchronize(), "backend initialization sync");
     }
 
+    double monitor_point(double *px, double *py) {
+        sparse_check(cusparseDnVecSetValues(monitor_x->d, px), "monitor x pointer");
+        sparse_check(cusparseDnVecSetValues(monitor_y->d, py), "monitor y pointer");
+        double one = 1, zero = 0;
+        if (a.nnz) {
+            sparse_check(cusparseSpMV(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE, &one, a.d,
+                                      monitor_x->d, &zero, monitor_aout->d, CUDA_R_64F,
+                                      CUSPARSE_SPMV_CSR_ALG2, monitor_workspace->p),
+                         "monitor A*x");
+            sparse_check(cusparseSpMV(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE, &one, at.d,
+                                      monitor_y->d, &zero, monitor_atout->d, CUDA_R_64F,
+                                      CUSPARSE_SPMV_CSR_ALG2, monitor_workspace->p),
+                         "monitor At*y");
+        }
+        if (quadratic)
+            sparse_check(cusparseSpMV(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE, &one,
+                                      quadratic->d, monitor_x->d, &zero, monitor_qout->d,
+                                      CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG2, monitor_workspace->p),
+                         "monitor Q*x");
+        auto blocks = (std::max(x.n, y.n) + 255) / 256;
+        if (!blocks)
+            return 0;
+        monitor_partial<<<blocks, 256, 0, stream.value>>>(
+            x.n, y.n, px, py, monitor_ax.p, monitor_aty.p, quadratic ? monitor_qx.p : nullptr, c.p,
+            q.p, lb.p, ub.p, rl.p, ru.p, monitor_cscale, monitor_partials.p);
+        monitor_reduce<<<1, 256, 0, stream.value>>>(blocks, monitor_partials.p, monitor_scalar.p);
+        check(cudaGetLastError(), "monitor reduction");
+        check(cudaStreamSynchronize(stream.value), "monitor sync");
+        std::vector<double> scalar;
+        monitor_scalar.download(scalar);
+        return scalar[0];
+    }
+    double monitor() override {
+        if (!monitor_initialized) {
+            monitor_ax = Buffer<double>(y.n);
+            monitor_aty = Buffer<double>(x.n);
+            monitor_qx = Buffer<double>(quadratic ? x.n : 0);
+            monitor_partials = Buffer<double>(5 * ((std::max(x.n, y.n) + 255) / 256));
+            monitor_scalar = Buffer<double>(1);
+            monitor_ax.zero();
+            monitor_aty.zero();
+            monitor_qx.zero();
+            monitor_x = std::make_unique<Vector>(x.n, x.p);
+            monitor_y = std::make_unique<Vector>(y.n, y.p);
+            monitor_aout = std::make_unique<Vector>(y.n, monitor_ax.p);
+            monitor_atout = std::make_unique<Vector>(x.n, monitor_aty.p);
+            if (quadratic)
+                monitor_qout = std::make_unique<Vector>(x.n, monitor_qx.p);
+            double one = 1, zero = 0;
+            size_t s1 = 0, s2 = 0, sq = 0;
+            if (a.nnz) {
+                sparse_check(cusparseSpMV_bufferSize(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                     &one, a.d, monitor_x->d, &zero,
+                                                     monitor_aout->d, CUDA_R_64F,
+                                                     CUSPARSE_SPMV_CSR_ALG2, &s1),
+                             "monitor A workspace");
+                sparse_check(cusparseSpMV_bufferSize(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                     &one, at.d, monitor_y->d, &zero,
+                                                     monitor_atout->d, CUDA_R_64F,
+                                                     CUSPARSE_SPMV_CSR_ALG2, &s2),
+                             "monitor At workspace");
+            }
+            if (quadratic)
+                sparse_check(cusparseSpMV_bufferSize(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                     &one, quadratic->d, monitor_x->d, &zero,
+                                                     monitor_qout->d, CUDA_R_64F,
+                                                     CUSPARSE_SPMV_CSR_ALG2, &sq),
+                             "monitor Q workspace");
+            monitor_workspace = std::make_unique<Buffer<char>>(std::max({s1, s2, sq}));
+            std::vector<double> cost;
+            c.download(cost);
+            for (auto v : cost)
+                monitor_cscale = std::max(monitor_cscale, 1 + std::abs(v));
+            check(cudaDeviceSynchronize(), "monitor setup sync");
+            monitor_initialized = true;
+        }
+        return std::min(monitor_point(x.p, y.p), monitor_point(xa.p, ya.p));
+    }
     int64_t rejected_steps() const override {
         return rejected;
     }

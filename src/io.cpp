@@ -136,11 +136,162 @@ Model read_json(std::istream &in) {
     canonicalize(m);
     return m;
 }
+Model read_qplib(std::istream &in) {
+    std::string line;
+    std::istringstream current;
+    auto token = [&]() -> std::string {
+        std::string value;
+        while (!(current >> value)) {
+            if (!std::getline(in, line))
+                throw std::runtime_error("Incomplete QPLIB input");
+            line = line.substr(0, line.find('#'));
+            current.clear();
+            current.str(line);
+        }
+        return value;
+    };
+    auto integer = [&]() {
+        auto text = token();
+        size_t consumed = 0;
+        auto value = std::stoll(text, &consumed);
+        if (consumed != text.size())
+            throw std::runtime_error("Invalid QPLIB integer token");
+        return value;
+    };
+    auto extended_number = [&]() {
+        auto text = token();
+        size_t consumed = 0;
+        auto value = std::stold(text, &consumed);
+        if (consumed != text.size() || !std::isfinite(value))
+            throw std::runtime_error("Invalid QPLIB numeric token");
+        return value;
+    };
+    auto count = [&]() {
+        auto value = integer();
+        if (value < 0 || value > 100000000)
+            throw std::runtime_error("Invalid QPLIB count");
+        return value;
+    };
+    Model m;
+    m.name = token();
+    auto type = token();
+    auto direction = token();
+    if (type.size() != 3 || type[1] != 'C' || (type[2] != 'L' && type[2] != 'B') ||
+        (type[0] != 'L' && type[0] != 'D' && type[0] != 'C' && type[0] != 'Q'))
+        throw std::runtime_error("UNSUPPORTED QPLIB class: continuous linear constraints/box only");
+    sense(m, direction);
+    auto n = count();
+    auto rows = type[2] == 'L' ? count() : 0;
+    for (int64_t j = 0; j < n; ++j)
+        addvar(m, "x" + std::to_string(j + 1));
+    std::vector<Entry> qe, e;
+    auto index = [&](int64_t size) {
+        auto value = integer();
+        if (value < 1 || value > size)
+            throw std::runtime_error("Invalid QPLIB index");
+        return value - 1;
+    };
+    if (type[0] != 'L') {
+        auto terms = count();
+        for (int64_t k = 0; k < terms; ++k) {
+            auto i = index(n), j = index(n);
+            auto v = number(token());
+            if (i < j)
+                throw std::runtime_error("QPLIB quadratic entries require lower triangle");
+            if (i == j)
+                m.q[i] += v;
+            else {
+                qe.push_back({i, j, v});
+                qe.push_back({j, i, v});
+            }
+        }
+    }
+    auto cost = number(token());
+    std::fill(m.c.begin(), m.c.end(), cost);
+    auto overrides = count();
+    for (int64_t k = 0; k < overrides; ++k) {
+        auto j = index(n);
+        m.c[j] = number(token());
+    }
+    m.offset = number(token());
+    if (rows) {
+        auto terms = count();
+        for (int64_t k = 0; k < terms; ++k) {
+            auto i = index(rows), j = index(n);
+            e.push_back({i, j, number(token())});
+        }
+    }
+    long double infinity_value = extended_number();
+    if (!(infinity_value > 0))
+        throw std::runtime_error("Invalid QPLIB infinity marker");
+    auto bvalue = [&]() {
+        auto value = extended_number();
+        if (value >= infinity_value)
+            return inf;
+        if (value <= -infinity_value)
+            return -inf;
+        auto v = double(value);
+        if (!std::isfinite(v))
+            throw std::runtime_error("QPLIB finite bound overflow");
+        return v;
+    };
+    auto bounds = [&](std::vector<double> &out, int64_t size) {
+        auto def = bvalue();
+        out.assign(size, def);
+        auto count_override = count();
+        for (int64_t k = 0; k < count_override; ++k) {
+            auto j = index(size);
+            out[j] = bvalue();
+        }
+    };
+    if (rows) {
+        bounds(m.rl, rows);
+        bounds(m.ru, rows);
+    }
+    bounds(m.lb, n);
+    bounds(m.ub, n);
+    // Consume starts without treating an unverified supplied point as a solution.
+    auto skip = [&](int64_t size) {
+        (void)number(token());
+        auto changes = count();
+        for (int64_t k = 0; k < changes; ++k) {
+            (void)index(size);
+            (void)number(token());
+        }
+    };
+    skip(n);
+    if (rows)
+        skip(rows);
+    skip(n);
+    auto changes = count();
+    for (int64_t k = 0; k < changes; ++k) {
+        auto j = index(n);
+        m.names[j] = token();
+    }
+    for (int64_t i = 0; i < rows; ++i)
+        m.row_names.push_back("r" + std::to_string(i + 1));
+    changes = count();
+    for (int64_t k = 0; k < changes; ++k) {
+        auto i = index(rows);
+        m.row_names[i] = token();
+    }
+    std::string trailing;
+    if (current >> trailing)
+        throw std::runtime_error("Unexpected QPLIB trailing data");
+    while (std::getline(in, line))
+        if (!trim(line.substr(0, line.find('#'))).empty())
+            throw std::runtime_error("Unexpected QPLIB trailing data");
+    m.A = Sparse::build(rows, n, std::move(e));
+    m.Q = Sparse::build(n, n, std::move(qe));
+    canonicalize(m);
+    return m;
+}
 Model read_mps(std::istream &in) {
     Model m;
     std::string section, line, obj, rhs_set, range_set, bound_set, last_col;
     std::map<std::string, int64_t> vars, rows;
     std::vector<Entry> quadratic_entries;
+    std::map<std::pair<int64_t, int64_t>, bool> quad_triangles;
     std::vector<char> rowtype;
     std::vector<double> rhs, ranges;
     std::vector<bool> has_range;
@@ -165,6 +316,39 @@ Model read_mps(std::istream &in) {
         if (trim(line).empty() || trim(line)[0] == '*')
             continue;
         auto t = words(line);
+        // Fixed MPS permits embedded blanks inside its eight-character names.
+        if (section == "ROWS" && line.size() >= 5 && line[0] == ' ' &&
+            trim(line.substr(2, 2)).empty() &&
+            (line.size() <= 12 || trim(line.substr(12)).empty())) {
+            auto name = trim(line.substr(4, 8));
+            if (!name.empty())
+                t = {trim(line.substr(1, 1)), name};
+        }
+        if ((section == "COLUMNS" || section == "RHS" || section == "RANGES") &&
+            line.size() >= 36 && line[0] == ' ' && trim(line.substr(12, 2)).empty() &&
+            trim(line.substr(22, 2)).empty() && trim(line.substr(36, 3)).empty()) {
+            auto first_value = trim(line.substr(24, 12));
+            auto first_row = trim(line.substr(14, 8));
+            bool numeric = false;
+            try {
+                (void)number(first_value);
+                numeric = true;
+            } catch (const std::exception &) {
+            }
+            if (numeric && !first_row.empty()) {
+                t = {trim(line.substr(4, 8)), first_row, first_value};
+                if (line.size() > 39) {
+                    auto second_row = trim(line.substr(39, 8));
+                    if (!second_row.empty()) {
+                        t.push_back(second_row);
+                        t.push_back(line.size() > 49 ? trim(line.substr(49, 12)) : "");
+                    }
+                }
+                // Existing blank-name continuation handling expects an omitted token.
+                if (t[0].empty())
+                    t.erase(t.begin());
+            }
+        }
         if (t.empty())
             continue;
         try {
@@ -275,6 +459,21 @@ Model read_mps(std::istream &in) {
                     }
                 });
             } else if (section == "BOUNDS") {
+                // Fixed-format files may omit the bound-set field, including
+                // the very first record. Preserve its column field explicitly.
+                if (line.size() >= 22 && trim(line.substr(3, 1)).empty() &&
+                    trim(line.substr(12, 2)).empty() && trim(line.substr(22, 2)).empty()) {
+                    auto set = trim(line.substr(4, 8));
+                    auto name = trim(line.substr(14, 8));
+                    auto value = line.size() > 24 ? trim(line.substr(24, 12)) : "";
+                    if (!name.empty()) {
+                        if (set.empty())
+                            set = bound_set.empty() ? "DEFAULT" : bound_set;
+                        t = {trim(line.substr(1, 2)), set, name};
+                        if (!value.empty())
+                            t.push_back(value);
+                    }
+                }
                 if (t.size() < 3 || t.size() > 4)
                     throw std::runtime_error("Malformed BOUNDS");
                 if (bound_set.empty())
@@ -321,6 +520,15 @@ Model read_mps(std::istream &in) {
                 if (i == j)
                     m.q[i] += number(t[2]);
                 else {
+                    if (section == "QUADOBJ") {
+                        auto key = std::minmax(i, j);
+                        bool triangle = i < j;
+                        auto found = quad_triangles.find(key);
+                        if (found != quad_triangles.end() && found->second != triangle)
+                            throw std::runtime_error(
+                                "Ambiguous QUADOBJ: provide one triangle only");
+                        quad_triangles[key] = triangle;
+                    }
                     quadratic_entries.push_back({i, j, number(t[2])});
                     if (section == "QUADOBJ")
                         quadratic_entries.push_back({j, i, number(t[2])});
@@ -584,6 +792,8 @@ Model read_model(const std::string &path) {
     if (!f)
         throw std::runtime_error("Cannot open model: " + path);
     auto ext = upper(path.substr(path.find_last_of('.') + 1));
+    if (ext == "QPLIB")
+        return read_qplib(f);
     if (ext == "JSON")
         return read_json(f);
     if (ext == "MPS" || ext == "QPS")
@@ -603,6 +813,14 @@ void write_model(const Model &m, const std::string &path) {
     }
     if (upper(path.substr(path.find_last_of('.') + 1)) != "MPS")
         throw std::runtime_error("Convert output must be .json or .mps");
+    for (const auto &name : m.names)
+        if (name.find_first_of(" \t\r\n") != std::string::npos)
+            throw std::runtime_error(
+                "MPS export with whitespace in names requires fixed-format output; use JSON");
+    for (const auto &name : m.row_names)
+        if (name.find_first_of(" \t\r\n") != std::string::npos)
+            throw std::runtime_error(
+                "MPS export with whitespace in names requires fixed-format output; use JSON");
     f << std::setprecision(17) << "NAME          " << m.name << "\nOBJSENSE\n "
       << (m.sense == 1 ? "MIN" : "MAX") << "\nROWS\n N  OBJ\n";
     std::vector<double> rhs(m.rl.size());
@@ -678,7 +896,7 @@ std::string result_json(const Model &m, const Result &r) {
         {"version", "0.2.0"},
         {"status", r.status},
         {"message", r.message},
-        {"problem_type", m.is_mip()  ? "MILP"
+        {"problem_type", m.is_mip()  ? (m.is_qp() ? "MIQP" : "MILP")
                          : m.is_qp() ? "QP"
                                      : "LP"},
         {"model",
@@ -718,6 +936,13 @@ std::string result_json(const Model &m, const Result &r) {
         {"presolve", {{"removed_rows", r.removed_rows}, {"removed_columns", r.removed_columns}}},
         {"primal", r.x},
         {"dual", r.y}};
+    j["selection"] = {{"method", r.method_selected},
+                      {"device", r.backend},
+                      {"reason", r.device_reason},
+                      {"estimated_gpu_bytes", r.estimated_gpu_bytes}};
+    j["performance"]["monitor_checks"] = r.monitor_checks;
+    j["performance"]["host_candidate_checks"] = r.host_candidate_checks;
+    j["performance"]["skipped_candidate_checks"] = r.skipped_candidate_checks;
     j["gpu_execution"] = {{"index_bits", r.gpu_index_bits},
                           {"cuda_graphs", r.graph_execution},
                           {"matrix_precision", r.matrix_precision}};
@@ -761,6 +986,10 @@ Result read_solution(const Model &m, const std::string &path, bool allow_model_c
     r.x = j.at("primal").get<std::vector<double>>();
     r.y = j.at("dual").get<std::vector<double>>();
     r.status = j.at("status");
+    if (j.contains("objective") && j["objective"].is_number())
+        r.accuracy.objective = m.sense * j["objective"].get<double>();
+    else if (j.contains("objective") && r.status == "OPTIMAL")
+        throw std::runtime_error("Claimed optimal objective must be finite and numeric");
     if (j.contains("certificate")) {
         if (j.at("certificate").at("kind") != "BOX_ROW_FARKAS")
             throw std::runtime_error("Unsupported certificate kind");

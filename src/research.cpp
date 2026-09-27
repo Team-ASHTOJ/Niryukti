@@ -179,9 +179,11 @@ int add_binary_cuts(Model &m, int limit) {
 }
 
 Model distance_projection_model(const Model &m, const std::vector<double> &target) {
-    if (target.size() != m.c.size() || m.is_qp())
+    if (target.size() != m.c.size())
         throw std::runtime_error("Invalid feasibility-pump projection");
     Model projection = m;
+    std::fill(projection.q.begin(), projection.q.end(), 0);
+    projection.Q = {};
     projection.name = m.name + "_distance";
     projection.offset = 0;
     projection.sense = 1;
