@@ -226,12 +226,17 @@ def run_job(job, options):
                     os.killpg(proc.pid, signal.SIGKILL); proc.wait()
         raw = out_path.read_text()
         try: result = json.loads(raw)
-        except ValueError: result = dict(status='ERROR', message=log_path.read_text()[-3000:] or 'Solver did not return a result.')
+        except ValueError:
+            diagnostic=log_path.read_text()[-3000:]
+            try: result=json.loads(diagnostic)
+            except ValueError: result=dict(status='ERROR',message=diagnostic or 'Solver did not return a result.')
+        if not isinstance(result,dict):result=dict(status='ERROR',message='Solver returned an invalid result object.')
         job['result'] = clean(result)
         job['state'] = 'finished'
     except Exception as exc:
         job.update(state='finished', result=dict(status='ERROR', message=str(exc)))
     finally:
+        job.pop('process',None)
         job['finished_at'] = time.time()
         (STORE/f"{job['id']}.json").write_text(json.dumps(clean(public_job(job)), indent=2))
 
@@ -310,6 +315,7 @@ class Handler(BaseHTTPRequestHandler):
             length=int(self.headers.get('Content-Length','0'))
             if not 0<length<=6_000_000: return self.send(413,dict(error='Request must be smaller than 6 MB.'))
             body=json.loads(self.rfile.read(length));path=urlparse(self.path).path
+            if not isinstance(body,dict):return self.send(400,dict(error='Request must be a JSON object.'))
             if path == '/api/upload':
                 name=Path(body.get('name','')).name; suffix=Path(name).suffix.lower()
                 if suffix not in ('.mps','.lp','.json','.qps','.qplib'): return self.send(400,dict(error='Choose an MPS, LP, JSON, QPS or supported QPLIB model.'))

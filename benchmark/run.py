@@ -60,7 +60,10 @@ def main():
     metadata['gpu_state']=execute(['nvidia-smi','--query-gpu=name,driver_version,memory.total,power.limit','--format=csv'],10)[1]
     cache=Path(a.binary).parent/'CMakeCache.txt'
     if cache.exists():metadata['cmake_cache']=cache.read_text()
-    metadata['source_sha256']={str(f.relative_to(ROOT)):hashlib.sha256(f.read_bytes()).hexdigest() for base in ['src','include','app'] for f in (ROOT/base).rglob('*') if f.is_file()}
+    source_files=[ROOT/'CMakeLists.txt']+[f for base in ['src','include','app','benchmark','scripts'] for f in (ROOT/base).rglob('*') if f.is_file() and '__pycache__' not in f.parts and f.suffix not in ('.pyc','.pyo')]
+    metadata['source_sha256']={str(f.relative_to(ROOT)):hashlib.sha256(f.read_bytes()).hexdigest() for f in source_files}
+    for f in source_files:
+        archived=out/'source'/f.relative_to(ROOT);archived.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(f,archived)
     metadata['git_dirty']=bool(subprocess.run(['git','status','--porcelain'],cwd=ROOT,text=True,capture_output=True).stdout.strip())
     metadata['devices']=execute([a.binary,'devices'],10)[1];(out/'manifest.json').write_text(json.dumps(metadata,indent=2))
     rows=[]
@@ -68,6 +71,7 @@ def main():
         path=Path(model).resolve();tag=f'{model_index:03d}_{path.stem}'
         try:checksum=hashlib.sha256(path.read_bytes()).hexdigest()
         except OSError:checksum=None
+        if checksum is not None:shutil.copy2(path,raw/f'{tag}.input{path.suffix}')
         inspect=execute([a.binary,'inspect',str(path)],10)[0]
         mps=raw/f'{tag}.mps'
         if path.suffix.lower() in ('.mps','.qps'):mps=path
@@ -99,6 +103,15 @@ def main():
                 data,stdout,stderr,code,wall=execute(command,a.time_limit+30)
                 (raw/f'{name}.stdout').write_text(stdout);(raw/f'{name}.stderr').write_text(stderr)
                 accuracy=data.get('accuracy',{})
+                if solver in ('cpu','cuda') and data.get('model',{}).get('fingerprint'):
+                    # Re-read the serialized result in a separate verifier process.
+                    sol=raw/f'{name}.solution.json';sol.write_text(stdout)
+                    verification_command=[a.binary,'verify',str(path),str(sol)]
+                    v,vout,verr,vcode,_=execute(verification_command,20)
+                    (raw/f'{name}.verify.stdout').write_text(vout)
+                    (raw/f'{name}.verify.stderr').write_text(verr)
+                    data['independent_verification']=v
+                    data['verification_process']=dict(command=verification_command,exit_code=vcode,tolerance=1e-6)
                 if solver=='highs' and data.get('primal') and inspect.get('fingerprint'):
                     # Verify baseline primal using NIRYUKTI's independent original-space checker.
                     sense=1
@@ -113,7 +126,8 @@ def main():
                 reported_status=data.get('status','UNKNOWN')
                 status=reported_status
                 verification_status=data.get('independent_verification',{}).get('status')
-                if solver=='highs' and reported_status=='OPTIMAL' and verification_status not in ('VERIFIED_OPTIMAL','VERIFIED_FEASIBLE'):
+                accepted_verification=('VERIFIED_FEASIBLE',) if inspect.get('type') in ('MILP','MIQP') else ('VERIFIED_OPTIMAL',)
+                if reported_status=='OPTIMAL' and verification_status not in accepted_verification:
                     status='VERIFICATION_FAILED'
                 perf=data.get('performance',{})
                 record=dict(instance=path.name,solver=solver,run=run,warmup=run<0,status=status,reported_status=reported_status,verification_status=verification_status,problem_type=inspect.get('type'),objective=data.get('objective'),primal_residual=accuracy.get('primal_residual'),dual_residual=accuracy.get('dual_residual'),kkt_error=accuracy.get('kkt_error'),iterations=perf.get('iterations'),end_to_end_seconds=perf.get('end_to_end_seconds'),iteration_seconds=perf.get('iteration_seconds'),process_wall_seconds=wall,rows=inspect.get('rows'),columns=inspect.get('columns'),nonzeros=inspect.get('nonzeros'),dataset_sha256=checksum,method_selected=data.get('selection',{}).get('method'),device_reason=data.get('selection',{}).get('reason'),monitor_checks=perf.get('monitor_checks'),host_candidate_checks=perf.get('host_candidate_checks'),skipped_candidate_checks=perf.get('skipped_candidate_checks'),mip_gap=data.get('mip',{}).get('relative_gap',data.get('mip_gap')),nodes=data.get('mip',{}).get('nodes',data.get('nodes')))

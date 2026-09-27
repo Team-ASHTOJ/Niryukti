@@ -1,5 +1,7 @@
 #include "json.hpp"
 #include "vantage/vantage.hpp"
+#include <cerrno>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <map>
@@ -158,11 +160,19 @@ Model read_qplib(std::istream &in) {
             throw std::runtime_error("Invalid QPLIB integer token");
         return value;
     };
+    // QPLIB infinity markers (e.g. 1.79769313486232e308) can exceed DBL_MAX. Where long double
+    // is only 64 bits (Apple Silicon), overflow means "beyond representable", i.e. infinite.
     auto extended_number = [&]() {
         auto text = token();
-        size_t consumed = 0;
-        auto value = std::stold(text, &consumed);
-        if (consumed != text.size() || !std::isfinite(value))
+        char *end = nullptr;
+        errno = 0;
+        long double value = std::strtold(text.c_str(), &end);
+        if (text.empty() || end != text.c_str() + text.size() || std::isnan(value))
+            throw std::runtime_error("Invalid QPLIB numeric token");
+        if (errno == ERANGE && std::fabs(value) > 1)
+            return value > 0 ? std::numeric_limits<long double>::infinity()
+                             : -std::numeric_limits<long double>::infinity();
+        if (std::isinf(value))
             throw std::runtime_error("Invalid QPLIB numeric token");
         return value;
     };

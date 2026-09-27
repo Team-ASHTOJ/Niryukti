@@ -1,6 +1,8 @@
 # VANTAGE future development plan
 
-Start from the dated teammate handoff. This is a gated roadmap, not a promise that every algorithm will be implemented before submission. Each milestone needs working code, independent correctness tests and reproducible measurements before its claims enter the presentation.
+Start from the [teammate handoff dated 27 September 2026](teammate_handoff_20260927.md). This is a gated roadmap, not a promise that every algorithm will be implemented before submission. Each milestone needs working code, independent correctness tests and reproducible measurements before its claims enter the presentation.
+
+Current implementation and validation gaps are tracked in the [27 September roadmap audit](roadmap_audit_20260927.md). No milestone exit gate is yet declared complete.
 
 ## Milestone A — Submission-ready checkpoint
 

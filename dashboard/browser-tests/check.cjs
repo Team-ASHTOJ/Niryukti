@@ -34,8 +34,10 @@ await page.locator('nav a[data-nav="benchmarks"]').click();await page.waitForSel
 await page.locator('#case-search').fill('israel');await page.waitForTimeout(100);if(await page.locator('tbody tr[data-case]').count()!==1)throw Error('Search failed');
 await page.locator('tr[data-case="israel"]').click();await page.waitForSelector('#drawer:not([hidden])');if(!await page.locator('#drawer').innerText().then(t=>t.includes('Original-space primal residual')))throw Error('Missing numerical evidence');await page.keyboard.press('Escape');
 await page.locator('nav a[data-nav="solve"]').click();await page.waitForSelector('#solve-form');
+// Optional monitoring must never prevent a completed solve from rendering.
+await page.route('**/api/system',route=>route.fulfill({status:404,contentType:'application/json',body:JSON.stringify({error:'Not found'})}));
 await page.locator('#model-select').selectOption('dispatch');await page.locator('input[name=iterations]').fill('1000');const submitted=page.waitForResponse(r=>r.url().endsWith('/api/runs')&&r.request().method()==='POST');await page.locator('#run-button').click();const job=await (await submitted).json();if(job.options.iterations!==1000)throw Error('Iteration budget was not accepted');
-await page.waitForSelector('#solve-output .pill.green',{timeout:30000});await page.screenshot({animations:'disabled',path:'/tmp/niryukti-solve.png',fullPage:true});
+await page.waitForSelector('#solve-output .pill.green',{timeout:30000});await page.unroute('**/api/system');await page.screenshot({animations:'disabled',path:'/tmp/niryukti-solve.png',fullPage:true});
 await page.locator('#platform-toggle').focus();await page.keyboard.press('ArrowDown');
 if(!await page.locator('.mega-links a').first().evaluate(e=>e===document.activeElement))throw Error('Mega menu keyboard entry failed');
 await page.screenshot({animations:'disabled',path:'/tmp/niryukti-navbar.png'});

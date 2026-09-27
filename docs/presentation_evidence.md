@@ -36,7 +36,7 @@ The core does not call HiGHS, SCIP, Gurobi or another optimization solver. HiGHS
 - For MILP report incumbent, global bound and MIP gap. Continuous KKT diagnostics of a rounded integer solution are not an MILP optimality certificate.
 - Generated refinery data are synthetic; they are not MRPL operational data.
 - A successful selected benchmark does not establish production readiness, million-variable scalability, or superiority over commercial solvers.
-- General sparse QP, MIQP, NLP, MINLP, advanced cuts and a full industrial branch-and-cut implementation are not currently supported.
+- General sparse convex QP and convex MIQP have limited implementations described in the [dated handoff](teammate_handoff_20260927.md). Large non-diagonally-dominant PSD validation remains restricted; MIQP certificates verify incumbents, not the search tree. NLP, MINLP, general advanced cuts and a full industrial branch-and-cut implementation are not supported. See the [current roadmap audit](roadmap_audit_20260927.md) before making readiness claims.
 
 ## Current evidence locations
 

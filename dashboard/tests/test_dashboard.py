@@ -1,8 +1,11 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
+import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 import urllib.request
 import urllib.error
 
@@ -12,11 +15,32 @@ server=importlib.util.module_from_spec(spec);spec.loader.exec_module(server)
 class DashboardTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.temp=tempfile.TemporaryDirectory()
+        cls.original_root,cls.original_store=server.ROOT,server.STORE
+        server.ROOT=Path(cls.temp.name)
+        server.STORE=server.ROOT/'results/dashboard';server.STORE.mkdir(parents=True)
+        server.BINARY=Path(os.environ.get('VANTAGE_TEST_BINARY',cls.original_root/'build/vantage')).resolve()
+        (server.ROOT/'examples').symlink_to(cls.original_root/'examples',target_is_directory=True)
+        # The API contract must not depend on ignored local benchmark campaigns.
+        folder=server.ROOT/'results/demo';(folder/'raw').mkdir(parents=True)
+        (folder/'manifest.json').write_text('{}')
+        for backend in ('cpu','cuda','highs'):
+            for run in range(3):
+                record=dict(instance='afiro.mps',solver=backend,run=run,status='ITERATION_LIMIT' if backend=='cuda' else 'OPTIMAL')
+                (folder/'raw'/f'{backend}_{run}.json').write_text(json.dumps(dict(record=record)))
         cls.http=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
         cls.url=f'http://127.0.0.1:{cls.http.server_port}'
         threading.Thread(target=cls.http.serve_forever,daemon=True).start()
     @classmethod
-    def tearDownClass(cls): cls.http.shutdown();cls.http.server_close()
+    def tearDownClass(cls):
+        cls.http.shutdown();cls.http.server_close()
+        server.ROOT,server.STORE=cls.original_root,cls.original_store
+        cls.temp.cleanup()
+    def setUp(self):
+        server.JOBS.clear();server.UPLOADED.clear()
+    def post(self,path,body):
+        request=urllib.request.Request(self.url+path,data=json.dumps(body).encode(),headers={'Content-Type':'application/json','X-Vantage-Token':server.TOKEN})
+        with urllib.request.urlopen(request) as response:return json.load(response)
     def get(self,path):
         with urllib.request.urlopen(self.url+path) as r: return json.load(r)
     def test_data_preserves_limits_and_deduplicates(self):
@@ -55,5 +79,62 @@ class DashboardTests(unittest.TestCase):
         with urllib.request.urlopen(self.url+'/api/export.csv') as r:
             self.assertIn('attachment',r.headers['Content-Disposition'])
             text=r.read().decode();self.assertIn('ITERATION_LIMIT',text);self.assertIn('mip_gap',text)
+
+    def test_import_and_invalid_model(self):
+        model=(self.original_root/'examples/refinery.json').read_text()
+        result=self.post('/api/upload',dict(name='refinery.json',content=model))
+        self.assertEqual(result['type'],'LP')
+        self.assertTrue(server.UPLOADED[result['id']].is_file())
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.post('/api/upload',dict(name='broken.json',content='{'))
+        self.assertEqual(caught.exception.code,400)
+
+    def test_arena_report_and_traversal(self):
+        server.JOBS['fixture']=dict(id='fixture',kind='arena',state='finished',result=dict(status='COMPARISON_PARTIAL'))
+        folder=server.STORE/'arena-fixture';folder.mkdir(exist_ok=True)
+        (folder/'index.html').write_text('retained failures')
+        (server.STORE/'secret.json').write_text('{}')
+        with urllib.request.urlopen(self.url+'/arena/fixture/index.html') as response:
+            self.assertEqual(response.read(),b'retained failures')
+        with self.assertRaises(urllib.error.HTTPError):
+            urllib.request.urlopen(self.url+'/arena/fixture/%2e%2e/secret.json')
+        with urllib.request.urlopen(self.url+'/api/runs/fixture/download') as response:
+            self.assertIn('attachment',response.headers['Content-Disposition'])
+            self.assertEqual(json.load(response)['status'],'COMPARISON_PARTIAL')
+
+    def test_queued_arena_cancellation_and_concurrency(self):
+        # Hold the worker at the queue boundary to deterministically test the race.
+        with patch.object(server,'run_arena'):
+            job=self.post('/api/runs',dict(model='dispatch',kind='arena',time_limit=1))
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.post('/api/runs',dict(model='dispatch',time_limit=1))
+        self.assertEqual(caught.exception.code,409)
+        self.post('/api/runs/'+job['id']+'/cancel',{})
+        self.assertTrue(server.JOBS[job['id']]['cancel_requested'])
+
+    def test_non_object_request_rejected(self):
+        with self.assertRaises(urllib.error.HTTPError) as caught:self.post('/api/runs',[])
+        self.assertEqual(caught.exception.code,400)
+
+    def test_arena_worker_retains_all_engines(self):
+        job=dict(id='worker',kind='arena',path=self.original_root/'examples/toy.lp',state='queued')
+        options=dict(time_limit=1,threads=1,tol=1e-6,iterations=1000,method='auto',branching='fractional',node_selection='best-bound')
+        with patch.object(server,'ROOT',self.original_root):server.run_arena(job,options)
+        self.assertEqual(job['state'],'finished')
+        self.assertEqual(job['result']['status'],'COMPARISON_COMPLETE')
+        engines={item['solver']:item for item in job['result']['comparisons']}
+        self.assertEqual(set(engines),{'cpu','cuda','highs'})
+        self.assertEqual(engines['cpu']['optimal_runs'],3)
+        self.assertTrue(all(item['runs']==3 for item in engines.values()))
+        self.assertTrue((server.STORE/'arena-worker/index.html').is_file())
+
+    def test_solve_worker_current_options(self):
+        job=dict(id='solve-worker',path=self.original_root/'examples/dispatch.json',state='queued')
+        options=dict(device='cpu',time_limit=2,threads=1,tol=1e-6,iterations=100000,method='pdhg',branching='fractional',node_selection='best-bound')
+        server.run_job(job,options)
+        self.assertEqual(job['state'],'finished')
+        self.assertEqual(job['result']['status'],'OPTIMAL')
+        self.assertEqual(job['result']['hardware']['backend'],'cpu')
+        self.assertNotIn('process',job)
 
 if __name__=='__main__':unittest.main()
