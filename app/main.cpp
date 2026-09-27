@@ -18,13 +18,15 @@ int main(int argc, char **argv) {
                    "     --no-presolve --scaling-passes 5 --no-restart --no-adaptive\n       "
                    "--node-limit 10000 --mip-gap 1e-4 --check-every 100\n"
                    "       --scaling ruiz|combined --method "
-                   "auto|simplex|pdhg|halpern|rhpdhg|r2hpdhg\n"
+                   "auto|simplex|dual-simplex|barrier|concurrent|pdhg|halpern|rhpdhg|r2hpdhg\n"
                    "       --primal-weight displacement|pid --power-iterations 0 --polishing\n"
                    "       --cuda-graphs --gpu-indices auto|32|64 --matrix-precision fp64|mixed\n"
                    "       --gpu-monitor --certificate-out certificate.json\n"
                    "       --node-selection best-bound|depth-first|best-estimate\n"
                    "       --branching fractional|reliability --cuts\n       --primal-heuristic "
-                   "repair|pump|rins|all\n"
+                   "repair|pump|rins|local|all\n"
+                   "       --checkpoint-out state.json --checkpoint-nodes 100 --resume state.json\n"
+                   "       --gpu-presolve --batch-strong-branching\n"
                    "       halpern: experimental CPU/CUDA LP, requires --no-adaptive\n";
             return 0;
         }
@@ -211,6 +213,10 @@ int main(int argc, char **argv) {
                 o.power_iterations = std::stoi(val());
             else if (a == "--cuda-graphs")
                 o.cuda_graphs = true;
+            else if (a == "--batch-strong-branching")
+                o.batch_strong_branching = true;
+            else if (a == "--gpu-presolve")
+                o.gpu_presolve = true;
             else if (a == "--gpu-monitor")
                 o.gpu_monitor = true;
             else if (a == "--gpu-indices")
@@ -227,6 +233,12 @@ int main(int argc, char **argv) {
                 output = val();
             else if (a == "--certificate-out")
                 certificate_output = val();
+            else if (a == "--checkpoint-out")
+                o.checkpoint_path = val();
+            else if (a == "--resume")
+                o.resume_path = val();
+            else if (a == "--checkpoint-nodes")
+                o.checkpoint_nodes = std::stoll(val());
             else if (a == "--warm-start")
                 warm = val();
             else if (a == "--allow-model-change")
@@ -246,6 +258,8 @@ int main(int argc, char **argv) {
             auto r = read_solution(m, warm, allow_model_change);
             o.initial_x = r.x;
             o.initial_y = r.y;
+            o.initial_basis = r.basis;
+            o.basis_fingerprint = r.basis_fingerprint;
         }
         auto r = solve(m, o);
         auto j = nlohmann::json::parse(result_json(m, r));

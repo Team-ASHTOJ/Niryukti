@@ -46,6 +46,47 @@ class CpuBackend final : public IterationBackend {
             anchor_ax = ax;
         }
     }
+    std::vector<std::vector<double>> snapshot() override {
+        return {x,
+                y,
+                delta_x,
+                xa,
+                ya,
+                ax,
+                anchor_x,
+                anchor_y,
+                anchor_ax,
+                {double(epoch_steps), factor, average_mass, double(accepted), double(rejected),
+                 initial_residual, previous_residual, request_restart ? 1. : 0.}};
+    }
+    void restore(const std::vector<std::vector<double>> &v) override {
+        auto current = snapshot();
+        if (v.size() != current.size())
+            throw std::runtime_error("CPU checkpoint state count");
+        for (size_t i = 0; i < v.size(); ++i)
+            if (v[i].size() != current[i].size())
+                throw std::runtime_error("CPU checkpoint state dimensions");
+        const auto &q = v[9];
+        if (q[0] < 0 || !(q[1] > 0) || q[2] < 0 || q[3] < 0 || q[4] < 0)
+            throw std::runtime_error("Invalid CPU checkpoint counters");
+        x = v[0];
+        y = v[1];
+        delta_x = v[2];
+        xa = v[3];
+        ya = v[4];
+        ax = v[5];
+        anchor_x = v[6];
+        anchor_y = v[7];
+        anchor_ax = v[8];
+        epoch_steps = int64_t(q[0]);
+        factor = q[1];
+        average_mass = q[2];
+        accepted = int64_t(q[3]);
+        rejected = int64_t(q[4]);
+        initial_residual = q[5];
+        previous_residual = q[6];
+        request_restart = q[7] != 0;
+    }
     int64_t rejected_steps() const override {
         return rejected;
     }

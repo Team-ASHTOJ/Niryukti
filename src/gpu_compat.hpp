@@ -1,0 +1,78 @@
+#pragma once
+#ifdef VANTAGE_HAS_HIP
+#include <hip/hip_runtime.h>
+#include <hipsparse/hipsparse.h>
+#define CUDART_VERSION 0
+#define cudaDevAttrMemoryPoolsSupported hipDevAttrMemoryPoolsSupported
+#define cudaDeviceGetAttribute hipDeviceGetAttribute
+#define cudaDeviceGetDefaultMemPool hipDeviceGetDefaultMemPool
+#define cudaDeviceProp hipDeviceProp
+#define cudaDeviceSynchronize hipDeviceSynchronize
+#define cudaError_t hipError_t
+#define cudaFree hipFree
+#define cudaFreeAsync hipFreeAsync
+#define cudaGetDevice hipGetDevice
+#define cudaGetDeviceCount hipGetDeviceCount
+#define cudaGetDeviceProperties hipGetDeviceProperties
+#define cudaGetErrorString hipGetErrorString
+#define cudaGetLastError hipGetLastError
+#define cudaGraphDestroy hipGraphDestroy
+#define cudaGraphExecDestroy hipGraphExecDestroy
+#define cudaGraphExec_t hipGraphExec_t
+#define cudaGraphInstantiate hipGraphInstantiate
+#define cudaGraphLaunch hipGraphLaunch
+#define cudaGraph_t hipGraph_t
+#define cudaMalloc hipMalloc
+#define cudaMallocAsync hipMallocAsync
+#define cudaMemGetInfo hipMemGetInfo
+#define cudaMemPoolAttrReleaseThreshold hipMemPoolAttrReleaseThreshold
+#define cudaMemPoolSetAttribute hipMemPoolSetAttribute
+#define cudaMemPool_t hipMemPool_t
+#define cudaMemcpy hipMemcpy
+#define cudaMemcpyAsync hipMemcpyAsync
+#define cudaMemcpyDeviceToDevice hipMemcpyDeviceToDevice
+#define cudaMemcpyDeviceToHost hipMemcpyDeviceToHost
+#define cudaMemcpyHostToDevice hipMemcpyHostToDevice
+#define cudaMemset hipMemset
+#define cudaStreamBeginCapture hipStreamBeginCapture
+#define cudaStreamCaptureModeGlobal hipStreamCaptureModeGlobal
+#define cudaStreamCreateWithFlags hipStreamCreateWithFlags
+#define cudaStreamDestroy hipStreamDestroy
+#define cudaStreamEndCapture hipStreamEndCapture
+#define cudaStreamNonBlocking hipStreamNonBlocking
+#define cudaStreamSynchronize hipStreamSynchronize
+#define cudaStream_t hipStream_t
+#define cudaSuccess hipSuccess
+#define cusparseCreate hipsparseCreate
+#define cusparseCreateCsr hipsparseCreateCsr
+#define cusparseCreateDnMat hipsparseCreateDnMat
+#define cusparseCreateDnVec hipsparseCreateDnVec
+#define cusparseDestroy hipsparseDestroy
+#define cusparseDestroyDnMat hipsparseDestroyDnMat
+#define cusparseDestroyDnVec hipsparseDestroyDnVec
+#define cusparseDestroySpMat hipsparseDestroySpMat
+#define cusparseDnMatDescr_t hipsparseDnMatDescr_t
+#define cusparseDnVecDescr_t hipsparseDnVecDescr_t
+#define cusparseDnVecSetValues hipsparseDnVecSetValues
+#define cusparseHandle_t hipsparseHandle_t
+#define cusparseSetStream hipsparseSetStream
+#define cusparseSpMM hipsparseSpMM
+#define cusparseSpMM_bufferSize hipsparseSpMM_bufferSize
+#define cusparseSpMV hipsparseSpMV
+#define cusparseSpMV_bufferSize hipsparseSpMV_bufferSize
+#define cusparseSpMatDescr_t hipsparseSpMatDescr_t
+#define cusparseStatus_t hipsparseStatus_t
+#define CUSPARSE_INDEX_32I HIPSPARSE_INDEX_32I
+#define CUSPARSE_INDEX_64I HIPSPARSE_INDEX_64I
+#define CUSPARSE_INDEX_BASE_ZERO HIPSPARSE_INDEX_BASE_ZERO
+#define CUSPARSE_OPERATION_NON_TRANSPOSE HIPSPARSE_OPERATION_NON_TRANSPOSE
+#define CUSPARSE_ORDER_COL HIPSPARSE_ORDER_COL
+#define CUSPARSE_SPMM_CSR_ALG2 HIPSPARSE_SPMM_CSR_ALG2
+#define CUSPARSE_SPMV_CSR_ALG2 HIPSPARSE_SPMV_CSR_ALG2
+#define CUSPARSE_STATUS_SUCCESS HIPSPARSE_STATUS_SUCCESS
+#define CUDA_R_32F HIP_R_32F
+#define CUDA_R_64F HIP_R_64F
+#else
+#include <cuda_runtime.h>
+#include <cusparse.h>
+#endif

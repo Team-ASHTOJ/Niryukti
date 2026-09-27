@@ -11,3 +11,4 @@ __pycache__/
 /dashboard/browser-tests/test-results/
 
 /datasets/public/
+/datasets/stress_public/miplib/rail03.mps

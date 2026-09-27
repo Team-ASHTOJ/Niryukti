@@ -1,5 +1,6 @@
 #include "../src/internal.hpp"
 #include <array>
+#include <filesystem>
 #include <iostream>
 #include <random>
 #include <stdexcept>
@@ -376,6 +377,360 @@ void simplex_and_cuts() {
     require(Verifier(bad).infeasibility_bound(r.infeasibility_ray) > 0,
             "simplex ray independently verified");
 }
+void completion_regressions() {
+    {
+        auto duplicate = model(1, 3, {{0, 0, 1}, {1, 0, 1}, {2, 0, 1}});
+        duplicate.lb = {0};
+        duplicate.ub = {10};
+        duplicate.c = {-1};
+        duplicate.rl = {2, -inf, -inf};
+        duplicate.ru = {inf, 3, 8};
+        Options o;
+        o.method = "auto";
+        o.device = "cpu";
+        auto r = solve(duplicate, o);
+        require(r.status == "OPTIMAL", "parallel rows restore upper source dual");
+        near(r.x[0], 3, 1e-6);
+        require(r.removed_rows == 2, "parallel row aggregation reduces model");
+        duplicate.c[0] = 1;
+        r = solve(duplicate, o);
+        require(r.status == "OPTIMAL", "parallel rows restore lower source dual");
+        near(r.x[0], 2, 1e-6);
+        duplicate.ru[1] = 1;
+        require(solve(duplicate, o).status == "INFEASIBLE", "identical-row contradiction proof");
+    }
+    auto m = model(3, 1, {{0, 0, 2}, {0, 1, 2}, {0, 2, 2}});
+    m.lb = {0, 0, 0};
+    m.ub = {1, 1, 1};
+    m.types.assign(3, VarType::Binary);
+    m.c = {-1, -1, -1};
+    m.ru = {3};
+    Options o;
+    o.method = "auto";
+    o.device = "cpu";
+    o.branching = "reliability";
+    auto complete = solve(m, o);
+    require(complete.status == "OPTIMAL", "baseline tree solves");
+    auto directory = std::filesystem::temp_directory_path() /
+                     ("vantage-tree-" + std::to_string(Clock::now().time_since_epoch().count()));
+    std::filesystem::create_directory(directory);
+    o.node_limit = 1;
+    o.checkpoint_path = (directory / "tree.json").string();
+    auto partial = solve(m, o);
+    require(partial.nodes_remaining > 0, "checkpoint retains open branches");
+    require(std::filesystem::exists(o.checkpoint_path), "tree checkpoint written");
+    o.node_limit = 10000;
+    o.resume_path = o.checkpoint_path;
+    auto resumed = solve(m, o);
+    require(resumed.status == "OPTIMAL", "resumed tree solves");
+    near(resumed.accuracy.objective, complete.accuracy.objective);
+    require(resumed.nodes == complete.nodes, "resume preserves processed tree state");
+    auto wrong = m;
+    wrong.c[0] = -2;
+    bool rejected = false;
+    try {
+        solve(wrong, o);
+    } catch (const std::exception &) {
+        rejected = true;
+    }
+    require(rejected, "resume rejects changed model");
+    o.cuts = true;
+    rejected = false;
+    try {
+        solve(m, o);
+    } catch (const std::exception &) {
+        rejected = true;
+    }
+    require(rejected, "resume rejects changed algorithm configuration");
+    std::filesystem::remove_all(directory);
+    for (const std::string device : {"cpu", "cuda"}) {
+        if (device == "cuda" && !cuda_available())
+            continue;
+        auto lp = model(2, 1, {{0, 0, 1}, {0, 1, 2}});
+        lp.c = {1, 1};
+        lp.rl = {4};
+        lp.ub = {10, 10};
+        Options state;
+        state.device = device;
+        state.iteration_limit = 10000;
+        auto direct = solve(lp, state);
+        require(direct.status == "OPTIMAL", "continuous direct solve");
+        auto path = std::filesystem::temp_directory_path() /
+                    ("vantage-state-" + device +
+                     std::to_string(Clock::now().time_since_epoch().count()) + ".json");
+        state.iteration_limit = 100;
+        state.check_every = 10;
+        state.checkpoint_nodes = 20;
+        state.checkpoint_path = path.string();
+        auto limited = solve(lp, state);
+        require(std::filesystem::exists(path), "continuous state snapshot exists");
+        state.iteration_limit = 10000;
+        state.resume_path = path.string();
+        auto resumed = solve(lp, state);
+        require(resumed.status == "OPTIMAL", "continuous full-state continuation");
+        near(resumed.accuracy.objective, direct.accuracy.objective, 1e-5);
+        auto wrong = lp;
+        wrong.c[0] = 2;
+        bool rejected = false;
+        try {
+            solve(wrong, state);
+        } catch (const std::exception &) {
+            rejected = true;
+        }
+        require(rejected, "continuous resume rejects model edit");
+        std::filesystem::remove(path);
+    }
+    for (const std::string heuristic : {"local", "all"}) {
+        Options strong;
+        strong.device = "cpu";
+        strong.method = "auto";
+        strong.cuts = true;
+        strong.branching = "reliability";
+        strong.primal_heuristic = heuristic;
+        auto solved = solve(m, strong);
+        require(solved.status == "OPTIMAL", "cuts/conflicts/local branching verified optimum");
+        near(solved.accuracy.objective, -1, 1e-5);
+    }
+    {
+        auto schedule = read_model("examples/scheduling.json");
+        Options o;
+        o.device = "cpu";
+        o.method = "auto";
+        o.branching = "reliability";
+        o.cuts = true;
+        o.primal_heuristic = "all";
+        auto result = solve(schedule, o);
+        require(result.status == "OPTIMAL",
+                "continuous node bound propagation closes scheduling proof");
+        near(result.accuracy.objective, 748, 1e-5);
+    }
+    // Separation adds only violated cuts and retains every feasible mixed assignment.
+    auto mixed = model(2, 1, {{0, 0, 2}, {0, 1, .5}});
+    mixed.lb = {0, 0};
+    mixed.ub = {3, 5};
+    mixed.ru = {2.5};
+    mixed.types[0] = VarType::Integer;
+    auto separated = mixed;
+    std::vector<double> fractional = {1.25, 0};
+    require(add_mir_cuts(separated, 4, &fractional) > 0, "violated MIR separated");
+    auto satisfied = mixed;
+    std::vector<double> integral = {1, 0};
+    require(add_mir_cuts(satisfied, 4, &integral) == 0, "nonviolated MIR not appended");
+    for (int x = 0; x <= 3; ++x)
+        for (int y = 0; y <= 100; ++y) {
+            std::vector<double> point = {double(x), y / 20.};
+            if (verify(mixed, point, {0}).primal <= 1e-12)
+                require(verify(separated, point, std::vector<double>(separated.rl.size())).primal <=
+                            1e-10,
+                        "separated MIR preserves mixed feasible points");
+        }
+    // Large non-dominant SPD blocks: optimum is exactly the all-one vector.
+    auto qp = model(300, 0, {});
+    qp.lb.assign(300, 0);
+    qp.ub.assign(300, 2);
+    std::vector<Entry> entries;
+    for (int i = 0; i < 300; i += 2) {
+        entries.insert(entries.end(), {{i, i, 1}, {i, i + 1, 2}, {i + 1, i, 2}, {i + 1, i + 1, 5}});
+        qp.c[i] = -3;
+        qp.c[i + 1] = -7;
+    }
+    qp.Q = Sparse::build(300, 300, entries);
+    bool supported = true;
+    try {
+        qp.validate();
+    } catch (const std::exception &e) {
+        if (std::string(e.what()).find("enable VANTAGE_SPARSE_LU") != std::string::npos)
+            supported = false;
+        else
+            throw;
+    }
+    {
+        auto lp = model(2, 1, {{0, 0, 1}, {0, 1, 1}});
+        lp.lb = {0, 0};
+        lp.ub = {10, 10};
+        lp.ru = {10};
+        lp.c = {-2, -1};
+        Options dual;
+        dual.device = "cpu";
+        dual.method = "dual-simplex";
+        dual.presolve = false;
+        dual.scaling_passes = 0;
+        auto cold = solve(lp, dual);
+        require(cold.status == "OPTIMAL", "dual engine cold basis initialization");
+        require(!cold.basis.empty(), "simplex exports explicit basis");
+        lp.ub[0] = 4;
+        dual.initial_basis = cold.basis;
+        dual.basis_fingerprint = cold.basis_fingerprint;
+        auto warm = solve(lp, dual);
+        require(warm.status == "OPTIMAL", "dual reoptimization solves changed bound");
+        require(warm.method_selected == "revised-dual-simplex", "actual dual pivot path used");
+        near(warm.accuracy.objective, -14, 1e-6);
+        near(warm.x[0], 4, 1e-6);
+        near(warm.x[1], 6, 1e-6);
+        dual.initial_basis.assign(cold.basis.size(), -1);
+        require(solve(lp, dual).status == "OPTIMAL", "invalid warm basis safely cold starts");
+        Options portfolio;
+        portfolio.method = "concurrent";
+        portfolio.device = "cpu";
+        auto raced = solve(lp, portfolio);
+        require(raced.status == "OPTIMAL", "concurrent LP portfolio verifies winner");
+        near(raced.accuracy.objective, -14, 1e-6);
+        portfolio.cancellation = std::make_shared<std::atomic<bool>>(true);
+        auto stopped = solve(lp, portfolio);
+        require(stopped.status != "NUMERICAL_ERROR", "portfolio cancellation remains safe");
+        Options barrier;
+        barrier.method = "barrier";
+        barrier.device = "cpu";
+        auto interior = solve(lp, barrier);
+        if (interior.status != "UNSUPPORTED") {
+            require(interior.status == "OPTIMAL", "predictor corrector LP barrier");
+            near(interior.accuracy.objective, -14, 1e-5);
+            auto qp = model(2, 1, {{0, 0, 1}, {0, 1, 1}});
+            qp.lb = {0, 0};
+            qp.ub = {10, 10};
+            qp.rl = qp.ru = {3};
+            qp.Q = Sparse::build(2, 2, {{0, 0, 2}, {0, 1, 1}, {1, 0, 1}, {1, 1, 2}});
+            auto q = solve(qp, barrier);
+            require(q.status == "OPTIMAL", "barrier sparse convex QP with equality");
+            near(q.x[0], 1.5, 1e-5);
+            near(q.x[1], 1.5, 1e-5);
+            near(q.accuracy.objective, 6.75, 1e-5);
+            portfolio.cancellation.reset();
+            auto qrace = solve(qp, portfolio);
+            require(qrace.status == "OPTIMAL", "concurrent sparse QP portfolio");
+        }
+    }
+    if (cuda_available()) {
+        {
+            auto lp = model(2, 1, {{0, 0, 1}, {0, 1, 1}});
+            lp.lb = {0, 0};
+            lp.ub = {10, 10};
+            lp.ru = {10};
+            lp.c = {-2, -1};
+            Options gpu;
+            gpu.device = "cuda";
+            gpu.method = "barrier";
+            auto result = solve(lp, gpu);
+            require(result.status == "OPTIMAL", "GPU Newton barrier verified LP");
+            near(result.accuracy.objective, -20, 1e-5);
+            auto qp = model(2, 1, {{0, 0, 1}, {0, 1, 1}});
+            qp.lb = {0, 0};
+            qp.ub = {10, 10};
+            qp.rl = qp.ru = {3};
+            qp.Q = Sparse::build(2, 2, {{0, 0, 2}, {0, 1, 1}, {1, 0, 1}, {1, 1, 2}});
+            result = solve(qp, gpu);
+            require(result.status == "OPTIMAL", "GPU Newton barrier verified QP");
+            near(result.accuracy.objective, 6.75, 1e-5);
+        }
+        // Device-directed bounds must preserve every enumerated feasible integer assignment.
+        auto integer =
+            model(3, 2, {{0, 0, .25}, {0, 1, -2}, {0, 2, 1}, {1, 0, 1}, {1, 1, 1}, {1, 2, 1}});
+        integer.lb = {-2, -2, -2};
+        integer.ub = {3, 3, 3};
+        integer.types.assign(3, VarType::Integer);
+        integer.rl = {.125, 2};
+        integer.ru = {2.375, 3};
+        auto low = integer.lb, high = integer.ub;
+        bool feasible = cuda_propagate_integer_bounds(integer, low, high);
+        int count = 0;
+        for (int x = -2; x <= 3; ++x)
+            for (int y = -2; y <= 3; ++y)
+                for (int z = -2; z <= 3; ++z) {
+                    std::vector<double> point = {double(x), double(y), double(z)};
+                    if (verify(integer, point, {0, 0}).primal <= 1e-12) {
+                        count++;
+                        require(feasible, "GPU propagation cannot remove feasible domain");
+                        for (int j = 0; j < 3; ++j)
+                            require(point[j] >= low[j] && point[j] <= high[j],
+                                    "GPU bounds preserve feasible assignment");
+                    }
+                }
+        require(count > 0, "GPU propagation oracle has feasible points");
+        auto impossible = integer;
+        impossible.rl[1] = 10;
+        impossible.ru[1] = 11;
+        low = impossible.lb;
+        high = impossible.ub;
+        require(!cuda_propagate_integer_bounds(impossible, low, high),
+                "GPU contradiction detection");
+        auto lp = model(2, 1, {{0, 0, 1}, {0, 1, 1}});
+        lp.lb = {0, 0};
+        lp.ub = {5, 5};
+        lp.rl = {3};
+        lp.c = {1, 2};
+        Options bo;
+        bo.device = "cuda";
+        bo.iteration_limit = 5000;
+        auto batch = cuda_batch_relaxations(lp, {{0, 0}, {0, 1}}, {{2, 5}, {5, 5}}, bo);
+        require(batch.size() == 2, "two GPU relaxations returned");
+        for (size_t b = 0; b < batch.size(); ++b) {
+            auto child = lp;
+            child.lb = b ? std::vector<double>{0, 1} : std::vector<double>{0, 0};
+            child.ub = b ? std::vector<double>{5, 5} : std::vector<double>{2, 5};
+            auto single = solve(child, bo);
+            require(batch[b].accuracy.finite, "batched point finite");
+            require(batch[b].accuracy.lower_bound <= single.accuracy.objective + 1e-8,
+                    "batched safe bound never exceeds optimum");
+            near(batch[b].accuracy.objective, 4, 1e-3);
+        }
+        bo.method = "auto";
+        bo.branching = "reliability";
+        bo.batch_strong_branching = true;
+        bo.gpu_presolve = true;
+        auto mip = solve(m, bo);
+        require(mip.status == "OPTIMAL", "GPU batched reliability tree");
+        near(mip.accuracy.objective, complete.accuracy.objective, 1e-5);
+    }
+    if (supported) {
+        auto singular = model(300, 0, {});
+        singular.ub.assign(300, 2);
+        std::vector<Entry> entries;
+        for (int i = 0; i < 300; i += 2)
+            entries.insert(entries.end(),
+                           {{i, i, 1}, {i, i + 1, 2}, {i + 1, i, 2}, {i + 1, i + 1, 4}});
+        singular.Q = Sparse::build(300, 300, entries);
+        singular.validate();
+        Options so;
+        so.device = "cpu";
+        auto answer = solve(singular, so);
+        require(answer.status == "OPTIMAL", "large singular non-dominant PSD accepted");
+        singular.Q.value.back() -= .001;
+        bool negative = false;
+        try {
+            singular.validate();
+        } catch (const std::exception &) {
+            negative = true;
+        }
+        require(negative, "singular PSD checker rejects negative perturbation");
+    }
+    if (supported) {
+        Options qo;
+        qo.device = "cpu";
+        qo.scaling = "combined";
+        auto solved = solve(qp, qo);
+        require(solved.status == "OPTIMAL", "large non-dominant SPD QP solves");
+        for (double x : solved.x)
+            near(x, 1, 1e-5);
+        near(solved.accuracy.objective, -750, 1e-6);
+        auto indefinite = qp;
+        indefinite.q[0] = -1;
+        bool rejected = false;
+        try {
+            indefinite.validate();
+        } catch (const std::exception &) {
+            rejected = true;
+        }
+        require(rejected, "large indefinite Q rejected");
+        if (cuda_available()) {
+            qo.device = "cuda";
+            qo.gpu_monitor = true;
+            qo.cuda_graphs = true;
+            auto gpu = solve(qp, qo);
+            require(gpu.status == "OPTIMAL", "CUDA large sparse SPD QP");
+            near(gpu.accuracy.objective, solved.accuracy.objective, 1e-6);
+        }
+    }
+}
 void gpu_execution() {
     if (!cuda_available())
         return;
@@ -727,6 +1082,7 @@ int main() {
         quadratic_extensions();
         sparse_qp_recession_guard();
         simplex_and_cuts();
+        completion_regressions();
         scaling();
         enhanced_first_order();
         mip_research();

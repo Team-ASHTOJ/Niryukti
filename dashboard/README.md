@@ -43,3 +43,11 @@ The sticky top navigation adapts the supplied [Zepa UI cohort-navbar](https://ze
 The overview computation stage includes a decorative cursor-responsive wave grid inspired by Zepa UI wave-hero (@franky-adl). It uses 256 Canvas 2D blocks at up to 24 updates per second with a fixed 640×360 backing surface and at most six pointer ripples. It stops offscreen, in hidden tabs, during local solver runs, or with reduced motion. Effects off leaves the computation stage running. The effect adds no WebGL, Three.js, GSAP, or network dependencies.
 
 The global PixelSnow background uses the supplied React Bits shader, adapted to native WebGL2 without adding React or Three.js. It uses the supplied square-flake settings, a backing canvas capped at 480×600, a 24 Hz timer, and low-power context preference. Motion pauses with reduced motion, Effects off, hidden tabs, or an active local solve. If WebGL2 initialization fails or its context is lost, the ordinary gradient/grid background remains available.
+
+## Current evidence and capabilities
+
+The dashboard loads the latest completed demonstration campaign, the verified large-LP screening report, corrected public-MILP comparisons and the explicit HiGHS IPM experiment when available. CSV summaries keep startup independent of large raw solution files. Cases retain CPU/CUDA/HiGHS results when additional SCIP/IPM baselines arrive. Each engine records its actual repetitions; single-run stress results are labeled exploratory.
+
+The million-variable card reports end-to-end speedup separately from iteration speedup. Objective agreement uses paired optimal continuous results, never a timeout objective as a reference optimum. MILP and MIQP rows display global MIP gaps. Detail drawers expose standalone verification, node counts, bounds and the relevant raw report.
+
+The overview and reference page describe implemented methods, checkpoint state and restricted features alongside pending work. For very large interactive solves, APIs return a 256-entry vector preview; saved result files and the Download solution endpoint retain the complete vectors. Copy summary JSON is explicitly a preview, not a transferable numerical certificate.

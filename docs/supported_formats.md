@@ -19,7 +19,7 @@
 
 Bounds omitted for variables default to [0,+infinity]; explicitly null lower/upper bounds mean -infinity/+infinity respectively. Row bounds default to unbounded. Strings `-inf` and `inf` are also accepted. Do not put nonstandard JSON NaN/Infinity numeric literals in files. Linear coefficients and optional diagonal Q follow variable order; row coefficient objects refer to variable names. Unknown variables, bad dimensions, NaNs, infinite coefficients and invalid bounds are rejected.
 
-`quadratic_diagonal` stores the diagonal in `0.5*xᵀQ*x`. Additional `quadratic_sparse` triples `[row,column,value]` must specify the full symmetric matrix, including both off-diagonal triangles. Entries are added to the diagonal shorthand. Supported convex MIQPs use the same representation. Nonconvex objectives are rejected. Large non-diagonally-dominant Q matrices are currently unsupported; numerical PSD checks for small matrices are limited to 256 variables.
+`quadratic_diagonal` stores the diagonal in `0.5*xᵀQ*x`. Additional `quadratic_sparse` triples `[row,column,value]` must specify the full symmetric matrix, including both off-diagonal triangles. Entries are added to the diagonal shorthand. Supported convex MIQPs use the same representation. Nonconvex objectives are rejected. Small matrices use a numerical PSD check up to 256 variables. Larger matrices may pass diagonal-dominance or sparse numerical SPD checks; guarded sparse semidefinite elimination recognizes additional singular PSD structures. Fill/operation limits and uncertain curvature remain explicit UNSUPPORTED cases. This is not unrestricted large PSD recognition.
 
 ## MPS
 

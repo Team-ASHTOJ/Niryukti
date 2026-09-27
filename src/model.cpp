@@ -1,8 +1,12 @@
 #include "vantage/vantage.hpp"
 #include <cstring>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_set>
+#ifdef VANTAGE_SPARSE_LU
+#include <Eigen/SparseCholesky>
+#endif
 namespace vantage {
 Sparse Sparse::build(int64_t m, int64_t n, std::vector<Entry> e) {
     if (m < 0 || n < 0)
@@ -137,31 +141,105 @@ void Model::validate() const {
             dominant &= diagonal >= off;
         }
         if (!dominant) {
-            if (n > 256)
-                throw std::runtime_error(
-                    "UNSUPPORTED: large sparse Q requires a diagonal-dominance PSD certificate");
-            // Dense storage is confined to small-model convexity validation, never iterations.
-            std::vector<long double> h(n * n);
-            for (size_t i = 0; i < n; ++i) {
-                h[i * n + i] = q[i];
-                for (auto k = Q.ptr[i]; k < Q.ptr[i + 1]; ++k)
-                    h[i * n + Q.index[k]] += Q.value[k];
-            }
-            for (size_t k = 0; k < n; ++k) {
-                auto pivot = h[k * n + k];
-                if (pivot < 0 || !std::isfinite(pivot))
-                    throw std::runtime_error("UNSUPPORTED: quadratic objective is not PSD");
-                if (pivot == 0) {
-                    for (size_t i = k + 1; i < n; ++i)
-                        if (h[i * n + k] != 0)
-                            throw std::runtime_error("UNSUPPORTED: quadratic objective is not PSD");
-                    continue;
+            if (n > 256) {
+#ifdef VANTAGE_SPARSE_LU
+                // Sparse numerical convexity validation; no optimizer is called.
+                // Strictly positive pivots certify the supported SPD class numerically.
+                // Singular/uncertain factorizations are rejected rather than regularized
+                // into a different objective or silently treated as convex.
+                using Matrix = Eigen::SparseMatrix<double>;
+                if (n > size_t(std::numeric_limits<int>::max()) ||
+                    Q.value.size() + n > size_t(std::numeric_limits<int>::max()))
+                    throw std::runtime_error(
+                        "UNSUPPORTED: sparse convexity factorization index limit");
+                std::vector<Eigen::Triplet<double>> terms;
+                terms.reserve(Q.value.size() + n);
+                for (size_t i = 0; i < n; ++i) {
+                    terms.emplace_back(int(i), int(i), q[i]);
+                    for (auto k = Q.ptr[i]; k < Q.ptr[i + 1]; ++k)
+                        terms.emplace_back(int(i), int(Q.index[k]), Q.value[k]);
                 }
-                for (size_t i = k + 1; i < n; ++i)
-                    for (size_t j = i; j < n; ++j) {
-                        h[j * n + i] -= h[i * n + k] * h[j * n + k] / pivot;
-                        h[i * n + j] = h[j * n + i];
+                Matrix h{int(n), int(n)};
+                h.setFromTriplets(terms.begin(), terms.end());
+                Eigen::SimplicialLDLT<Matrix> factor;
+                factor.compute(h);
+                bool positive = factor.info() == Eigen::Success;
+                if (positive)
+                    for (int i = 0; i < factor.vectorD().size(); ++i)
+                        positive = positive && factor.vectorD()[i] > 0 &&
+                                   std::isfinite(factor.vectorD()[i]);
+                if (!positive) {
+                    // Independent sparse semidefinite elimination. A zero pivot is
+                    // admissible only when its entire remaining row is exactly zero;
+                    // no negative curvature is hidden by a regularizing shift.
+                    std::vector<std::map<int, long double>> upper(n);
+                    size_t stored = n, operations = 0;
+                    for (size_t i = 0; i < n; ++i) {
+                        upper[i][int(i)] = q[i];
+                        for (auto k = Q.ptr[i]; k < Q.ptr[i + 1]; ++k)
+                            if (Q.index[k] >= int64_t(i)) {
+                                upper[i][int(Q.index[k])] += Q.value[k];
+                                ++stored;
+                            }
                     }
+                    for (size_t k = 0; k < n; ++k) {
+                        long double pivot = upper[k][int(k)];
+                        if (!std::isfinite(pivot) || pivot < 0)
+                            throw std::runtime_error(
+                                "UNSUPPORTED: sparse Q has negative curvature");
+                        std::vector<std::pair<int, long double>> neighbors;
+                        for (auto [j, v] : upper[k])
+                            if (j > int(k) && v != 0)
+                                neighbors.push_back({j, v});
+                        if (pivot == 0 && !neighbors.empty())
+                            throw std::runtime_error(
+                                "UNSUPPORTED: uncertain singular sparse Q curvature");
+                        if (pivot > 0)
+                            for (size_t i = 0; i < neighbors.size(); ++i)
+                                for (size_t j = i; j < neighbors.size(); ++j) {
+                                    if (++operations > 5000000 || stored > 1000000)
+                                        throw std::runtime_error(
+                                            "UNSUPPORTED: sparse PSD validation fill guard");
+                                    auto [row, a] = neighbors[i];
+                                    auto [col, b] = neighbors[j];
+                                    auto inserted = upper[row].try_emplace(col, 0);
+                                    if (inserted.second)
+                                        ++stored;
+                                    inserted.first->second -= a * b / pivot;
+                                }
+                        stored -= upper[k].size();
+                        upper[k].clear();
+                    }
+                }
+#else
+                throw std::runtime_error(
+                    "UNSUPPORTED: enable VANTAGE_SPARSE_LU for large non-dominant sparse Q");
+#endif
+            } else {
+                // Dense storage is confined to small-model convexity validation, never iterations.
+                std::vector<long double> h(n * n);
+                for (size_t i = 0; i < n; ++i) {
+                    h[i * n + i] = q[i];
+                    for (auto k = Q.ptr[i]; k < Q.ptr[i + 1]; ++k)
+                        h[i * n + Q.index[k]] += Q.value[k];
+                }
+                for (size_t k = 0; k < n; ++k) {
+                    auto pivot = h[k * n + k];
+                    if (pivot < 0 || !std::isfinite(pivot))
+                        throw std::runtime_error("UNSUPPORTED: quadratic objective is not PSD");
+                    if (pivot == 0) {
+                        for (size_t i = k + 1; i < n; ++i)
+                            if (h[i * n + k] != 0)
+                                throw std::runtime_error(
+                                    "UNSUPPORTED: quadratic objective is not PSD");
+                        continue;
+                    }
+                    for (size_t i = k + 1; i < n; ++i)
+                        for (size_t j = i; j < n; ++j) {
+                            h[j * n + i] -= h[i * n + k] * h[j * n + k] / pivot;
+                            h[i * n + j] = h[j * n + i];
+                        }
+                }
             }
         }
     }

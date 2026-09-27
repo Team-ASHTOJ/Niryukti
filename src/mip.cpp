@@ -1,15 +1,24 @@
 #include "internal.hpp"
+#include "json.hpp"
+#include <array>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
 #include <queue>
 #include <set>
+#include <stdexcept>
 #include <utility>
 namespace vantage {
 namespace {
 struct Node {
     std::vector<double> lb, ub, x, y;
+    std::vector<int64_t> basis;
+    std::string basis_fingerprint;
     std::vector<int64_t> changed;
     std::vector<double> changed_lb, changed_ub;
     double estimate = -inf;
     double bound = -inf;
+    uint64_t id = 0;
     int depth = 0;
     int64_t branch_variable = -1;
     bool branch_up = false;
@@ -30,8 +39,9 @@ struct Pseudocost {
         return distance * (count ? mean : fallback);
     }
 };
-// Conservative interval arithmetic for implied INTEGER bounds only. Row bounds stay
-// unchanged, so continuous dual postsolve does not need new multiplier mappings.
+// Conservative interval arithmetic for implied node variable bounds. Integer bounds
+// are rounded inward only after enclosing the implied endpoint; continuous endpoints
+// are rounded outward. These valid node-box reductions support finite dual bounds.
 long double outward(long double value, bool lower) {
     return std::nextafter(value, lower ? -std::numeric_limits<long double>::infinity()
                                        : std::numeric_limits<long double>::infinity());
@@ -61,7 +71,8 @@ bool propagate(const Model &m, Node &node, int64_t &tightened) {
                 double a = m.A.value[k];
                 auto term_low = outward((long double)a * (a > 0 ? node.lb[j] : node.ub[j]), true);
                 auto term_high = outward((long double)a * (a > 0 ? node.ub[j] : node.lb[j]), false);
-                if (m.types[j] != VarType::Continuous) {
+                {
+                    bool integer = m.types[j] != VarType::Continuous;
                     long double others_low = outward(low[t] + suffix_low, true);
                     long double others_high = outward(high[t] + suffix_high, false);
                     long double implied_low = -inf, implied_high = inf;
@@ -80,16 +91,20 @@ bool propagate(const Model &m, Node &node, int64_t &tightened) {
                             implied_low = outward(numerator / a, true);
                     }
                     // Restrict tightening to exactly representable integer magnitudes.
-                    if (std::abs(implied_low) < 0x1p52L) {
-                        double bound = double(std::ceil(implied_low));
+                    if (std::isfinite(implied_low) &&
+                        (!integer || std::abs(implied_low) < 0x1p52L)) {
+                        double bound = integer ? double(std::ceil(implied_low))
+                                               : std::nextafter(double(implied_low), -inf);
                         if (bound > node.lb[j]) {
                             node.lb[j] = bound;
                             changed = true;
                             tightened++;
                         }
                     }
-                    if (std::abs(implied_high) < 0x1p52L) {
-                        double bound = double(std::floor(implied_high));
+                    if (std::isfinite(implied_high) &&
+                        (!integer || std::abs(implied_high) < 0x1p52L)) {
+                        double bound = integer ? double(std::floor(implied_high))
+                                               : std::nextafter(double(implied_high), inf);
                         if (bound < node.ub[j]) {
                             node.ub[j] = bound;
                             changed = true;
@@ -117,7 +132,7 @@ struct Compare {
             return a.depth < b.depth;
         if (policy == "best-estimate" && a.estimate != b.estimate)
             return a.estimate > b.estimate;
-        return a.bound > b.bound;
+        return a.bound != b.bound ? a.bound > b.bound : a.id > b.id;
     }
 };
 struct NodeQueue : std::priority_queue<Node, std::vector<Node>, Compare> {
@@ -133,7 +148,7 @@ struct NodeQueue : std::priority_queue<Node, std::vector<Node>, Compare> {
 Result solve_mip(const Model &original, const Options &options) {
     auto start = Clock::now();
     Result out;
-    out.method_selected = options.cuts ? "branch-and-bound-with-root-cuts" : "branch-and-bound";
+    out.method_selected = options.cuts ? "branch-and-cut" : "branch-and-bound";
     out.status = "NODE_LIMIT";
     Model relaxation = original;
     if (options.cuts) {
@@ -141,11 +156,14 @@ Result solve_mip(const Model &original, const Options &options) {
         out.cuts_added += add_mir_cuts(relaxation, 64);
     }
     std::fill(relaxation.types.begin(), relaxation.types.end(), VarType::Continuous);
+    const Model root_relaxation = relaxation;
     Node root;
     root.lb = original.lb;
     root.ub = original.ub;
     root.x = options.initial_x;
     root.y = options.initial_y;
+    root.basis = options.initial_basis;
+    root.basis_fingerprint = options.basis_fingerprint;
     if (!root.y.empty())
         root.y.resize(relaxation.rl.size(), 0);
     for (size_t j = 0; j < original.c.size(); j++)
@@ -175,11 +193,14 @@ Result solve_mip(const Model &original, const Options &options) {
         if (base_lb.size() > 10000 && !preserve_warm) {
             std::vector<double>().swap(node.x);
             std::vector<double>().swap(node.y);
+            std::vector<int64_t>().swap(node.basis);
+            node.basis_fingerprint.clear();
         }
     };
     NodeQueue queue(Compare{options.node_selection});
     pack(root, true);
     queue.push(root);
+    uint64_t next_node_id = 1;
     double incumbent = inf, closed = inf, unresolved = inf;
     int64_t unresolved_count = 0;
     size_t cost_count = options.branching == "reliability" ? original.c.size() : 0;
@@ -216,8 +237,309 @@ Result solve_mip(const Model &original, const Options &options) {
         out.iteration_seconds += h.iteration_seconds;
         out.verification_seconds += h.verification_seconds;
     };
+    // Checkpoints are trusted local solver state, not standalone mathematical proofs.
+    // They preserve the open tree, unresolved/closed bounds, pseudocosts and incumbent.
+    using Json = nlohmann::json;
+    auto number = [](double value) -> Json {
+        if (std::isnan(value))
+            throw std::runtime_error("NaN checkpoint state");
+        return std::isfinite(value) ? Json(value) : Json(value < 0 ? "-inf" : "+inf");
+    };
+    auto decode = [](const Json &value) -> double {
+        if (value.is_number()) {
+            double result = value.get<double>();
+            if (!std::isfinite(result))
+                throw std::runtime_error("Nonfinite checkpoint number");
+            return result;
+        }
+        if (value == "-inf")
+            return -inf;
+        if (value == "+inf")
+            return inf;
+        throw std::runtime_error("Invalid checkpoint number");
+    };
+    auto numbers = [&](const std::vector<double> &values) {
+        Json result = Json::array();
+        for (double v : values)
+            result.push_back(number(v));
+        return result;
+    };
+    auto decode_numbers = [&](const Json &values) {
+        std::vector<double> result;
+        for (const auto &v : values)
+            result.push_back(decode(v));
+        return result;
+    };
+    Json configuration = {{"method", options.method},
+                          {"device", options.device},
+                          {"tol", options.tol},
+                          {"mip_gap", options.mip_gap},
+                          {"integer_tol", options.integer_tol},
+                          {"presolve", options.presolve},
+                          {"restart", options.restart},
+                          {"adaptive", options.adaptive},
+                          {"scaling", options.scaling},
+                          {"scaling_passes", options.scaling_passes},
+                          {"branching", options.branching},
+                          {"node_selection", options.node_selection},
+                          {"cuts", options.cuts},
+                          {"primal_heuristic", options.primal_heuristic},
+                          {"primal_weight", options.primal_weight},
+                          {"power_iterations", options.power_iterations},
+                          {"polishing", options.polishing},
+                          {"iteration_limit", options.iteration_limit},
+                          {"check_every", options.check_every},
+                          {"gpu_indices", options.gpu_indices},
+                          {"matrix_precision", options.matrix_precision},
+                          {"cuda_graphs", options.cuda_graphs},
+                          {"gpu_monitor", options.gpu_monitor},
+                          {"gpu_presolve", options.gpu_presolve},
+                          {"batch_strong_branching", options.batch_strong_branching},
+                          {"threads", options.threads}};
+    using Conflict = std::vector<std::pair<int64_t, int>>;
+    std::vector<Conflict> conflicts;
+    struct PooledCut {
+        std::vector<std::pair<int64_t, double>> terms;
+        double lower, upper, efficacy = 0;
+        int age = 0, uses = 0;
+    };
+    std::vector<PooledCut> cut_pool;
+    auto append_cut = [](Model &model, const PooledCut &cut) {
+        std::vector<Entry> entries;
+        entries.reserve(model.A.value.size() + cut.terms.size());
+        for (int64_t i = 0; i < model.A.rows; ++i)
+            for (auto k = model.A.ptr[i]; k < model.A.ptr[i + 1]; ++k)
+                entries.push_back({i, model.A.index[k], model.A.value[k]});
+        auto row = model.rl.size();
+        for (auto [j, a] : cut.terms)
+            entries.push_back({int64_t(row), j, a});
+        model.rl.push_back(cut.lower);
+        model.ru.push_back(cut.upper);
+        model.row_names.push_back("vantage_pool_" + std::to_string(row));
+        model.A = Sparse::build(model.rl.size(), model.c.size(), std::move(entries));
+    };
+    auto learn_conflict = [&](const Node &node) {
+        Conflict conflict;
+        for (size_t j = 0; j < original.c.size(); ++j) {
+            if (original.types[j] != VarType::Binary) {
+                // This deliberately excludes nonbinary branch conditions from binary no-goods.
+                if (node.lb[j] != base_lb[j] || node.ub[j] != base_ub[j])
+                    return;
+            } else if (node.lb[j] == node.ub[j])
+                conflict.push_back({int64_t(j), int(node.lb[j])});
+        }
+        if (conflict.empty() ||
+            std::find(conflicts.begin(), conflicts.end(), conflict) != conflicts.end())
+            return;
+        if (conflicts.size() == 128)
+            conflicts.erase(conflicts.begin());
+        conflicts.push_back(std::move(conflict));
+        out.conflicts_learned++;
+    };
+    auto snapshot = [&]() {
+        if (options.checkpoint_path.empty())
+            return;
+        Json saved = {{"schema", "vantage-tree-1"},
+                      {"model_fingerprint", original.fingerprint()},
+                      {"configuration", configuration},
+                      {"conflicts", conflicts},
+                      {"incumbent", number(incumbent)},
+                      {"closed", number(closed)},
+                      {"unresolved", number(unresolved)},
+                      {"unresolved_count", unresolved_count},
+                      {"next_node_id", next_node_id},
+                      {"x", out.x},
+                      {"y", out.y}};
+        saved["cut_pool"] = Json::array();
+        for (const auto &cut : cut_pool)
+            saved["cut_pool"].push_back({{"terms", cut.terms},
+                                         {"lower", number(cut.lower)},
+                                         {"upper", number(cut.upper)},
+                                         {"efficacy", cut.efficacy},
+                                         {"age", cut.age},
+                                         {"uses", cut.uses}});
+        saved["queue"] = Json::array();
+        auto copy = queue;
+        while (!copy.empty()) {
+            const auto &n = copy.top();
+            saved["queue"].push_back({{"id", n.id},
+                                      {"changed", n.changed},
+                                      {"lb", numbers(n.changed_lb)},
+                                      {"ub", numbers(n.changed_ub)},
+                                      {"x", n.x},
+                                      {"y", n.y},
+                                      {"basis", n.basis},
+                                      {"basis_fingerprint", n.basis_fingerprint},
+                                      {"bound", number(n.bound)},
+                                      {"estimate", number(n.estimate)},
+                                      {"depth", n.depth},
+                                      {"branch_variable", n.branch_variable},
+                                      {"branch_up", n.branch_up},
+                                      {"branch_distance", n.branch_distance},
+                                      {"parent_objective", number(n.parent_objective)}});
+            copy.pop();
+        }
+        saved["down"] = Json::array();
+        saved["up"] = Json::array();
+        for (const auto &p : down)
+            saved["down"].push_back({{"mean", p.mean}, {"count", p.count}});
+        for (const auto &p : up)
+            saved["up"].push_back({{"mean", p.mean}, {"count", p.count}});
+        saved["statistics"] = {{"nodes", out.nodes},
+                               {"iterations", out.iterations},
+                               {"restarts", out.restarts},
+                               {"cuts_added", out.cuts_added},
+                               {"cut_rounds", out.cut_rounds},
+                               {"local_cuts_added", out.local_cuts_added},
+                               {"bounds_tightened", out.bounds_tightened},
+                               {"strong_branch_probes", out.strong_branch_probes},
+                               {"pump_rounds", out.pump_rounds},
+                               {"rins_calls", out.rins_calls},
+                               {"heuristic_nodes", out.heuristic_nodes},
+                               {"conflicts_learned", out.conflicts_learned},
+                               {"conflicts_pruned", out.conflicts_pruned},
+                               {"local_branching_calls", out.local_branching_calls}};
+        std::filesystem::path destination(options.checkpoint_path);
+        auto temporary = destination;
+        temporary += ".tmp";
+        {
+            std::ofstream stream(temporary, std::ios::trunc);
+            if (!stream)
+                throw std::runtime_error("Cannot create tree checkpoint");
+            stream << saved.dump(2) << '\n';
+            stream.flush();
+            if (!stream)
+                throw std::runtime_error("Failed writing tree checkpoint");
+        }
+        std::filesystem::rename(temporary, destination);
+    };
+    if (!options.resume_path.empty()) {
+        Json saved;
+        std::ifstream stream(options.resume_path);
+        if (!stream)
+            throw std::runtime_error("Cannot open tree checkpoint");
+        stream >> saved;
+        if (saved.at("schema") != "vantage-tree-1" ||
+            saved.at("model_fingerprint") != original.fingerprint() ||
+            saved.at("configuration") != configuration)
+            throw std::runtime_error("Checkpoint model, schema or solver configuration mismatch");
+        for (const auto &item : saved.value("cut_pool", Json::array())) {
+            PooledCut cut;
+            cut.terms = item.at("terms").get<std::vector<std::pair<int64_t, double>>>();
+            cut.lower = decode(item.at("lower"));
+            cut.upper = decode(item.at("upper"));
+            cut.efficacy = item.at("efficacy");
+            cut.age = item.at("age");
+            cut.uses = item.at("uses");
+            if (cut.lower > cut.upper || !std::isfinite(cut.efficacy) || cut.age < 0 ||
+                cut.uses < 0)
+                throw std::runtime_error("Invalid checkpoint cut state");
+            for (auto [j, a] : cut.terms)
+                if (j < 0 || j >= int64_t(original.c.size()) || !std::isfinite(a))
+                    throw std::runtime_error("Invalid checkpoint cut term");
+            cut_pool.push_back(std::move(cut));
+            if (cut_pool.size() > 64)
+                throw std::runtime_error("Checkpoint cut pool capacity");
+        }
+        conflicts = saved.at("conflicts").get<std::vector<Conflict>>();
+        if (conflicts.size() > 128)
+            throw std::runtime_error("Checkpoint conflict pool too large");
+        for (const auto &conflict : conflicts)
+            for (auto [j, v] : conflict)
+                if (j < 0 || j >= int64_t(original.c.size()) ||
+                    original.types[j] != VarType::Binary || (v != 0 && v != 1))
+                    throw std::runtime_error("Malformed checkpoint binary conflict");
+        incumbent = decode(saved.at("incumbent"));
+        closed = decode(saved.at("closed"));
+        unresolved = decode(saved.at("unresolved"));
+        next_node_id = saved.at("next_node_id").get<uint64_t>();
+        unresolved_count = saved.at("unresolved_count").get<int64_t>();
+        if (unresolved_count < 0)
+            throw std::runtime_error("Invalid unresolved checkpoint count");
+        out.x = saved.at("x").get<std::vector<double>>();
+        out.y = saved.at("y").get<std::vector<double>>();
+        if (std::isfinite(incumbent)) {
+            auto a = verify(original, out.x, out.y);
+            if (!a.finite || a.primal > options.tol || a.integrality > options.integer_tol ||
+                std::abs(a.objective - incumbent) > options.tol * (1 + std::abs(incumbent)))
+                throw std::runtime_error("Checkpoint incumbent fails original-model verification");
+            out.accuracy = a;
+        } else if (!out.x.empty() || !out.y.empty())
+            throw std::runtime_error("Checkpoint has vectors without an incumbent");
+        queue = NodeQueue(Compare{options.node_selection});
+        for (const auto &item : saved.at("queue")) {
+            Node n;
+            n.id = item.at("id").get<uint64_t>();
+            n.changed = item.at("changed").get<std::vector<int64_t>>();
+            n.changed_lb = decode_numbers(item.at("lb"));
+            n.changed_ub = decode_numbers(item.at("ub"));
+            n.basis = item.at("basis").get<std::vector<int64_t>>();
+            n.basis_fingerprint = item.at("basis_fingerprint");
+            n.x = item.at("x").get<std::vector<double>>();
+            n.y = item.at("y").get<std::vector<double>>();
+            n.bound = decode(item.at("bound"));
+            n.estimate = decode(item.at("estimate"));
+            n.depth = item.at("depth");
+            n.branch_variable = item.at("branch_variable");
+            n.branch_up = item.at("branch_up");
+            n.branch_distance = item.at("branch_distance");
+            n.parent_objective = decode(item.at("parent_objective"));
+            if (n.changed.size() != n.changed_lb.size() ||
+                n.changed.size() != n.changed_ub.size() || n.depth < 0 || n.branch_variable < -1 ||
+                n.branch_variable >= int64_t(original.c.size()) ||
+                !std::isfinite(n.branch_distance) || n.branch_distance < 0 ||
+                (!n.x.empty() && n.x.size() != original.c.size()) ||
+                (!n.y.empty() && n.y.size() != root_relaxation.rl.size()))
+                throw std::runtime_error("Malformed checkpoint node");
+            for (size_t k = 0; k < n.changed.size(); ++k) {
+                auto j = n.changed[k];
+                if (j < 0 || j >= int64_t(base_lb.size()) || std::isnan(n.changed_lb[k]) ||
+                    std::isnan(n.changed_ub[k]) || n.changed_lb[k] < base_lb[j] ||
+                    n.changed_ub[k] > base_ub[j] || n.changed_lb[k] > n.changed_ub[k])
+                    throw std::runtime_error("Invalid checkpoint node bounds");
+            }
+            for (double v : n.x)
+                if (!std::isfinite(v))
+                    throw std::runtime_error("Invalid checkpoint primal");
+            for (double v : n.y)
+                if (!std::isfinite(v))
+                    throw std::runtime_error("Invalid checkpoint dual");
+            queue.push(std::move(n));
+        }
+        for (auto [target, key] : {std::pair{&down, "down"}, std::pair{&up, "up"}}) {
+            const auto &items = saved.at(key);
+            if (items.size() != target->size())
+                throw std::runtime_error("Checkpoint pseudocost dimension mismatch");
+            for (size_t j = 0; j < items.size(); ++j) {
+                (*target)[j].mean = items[j].at("mean");
+                (*target)[j].count = items[j].at("count");
+                if (!std::isfinite((*target)[j].mean) || (*target)[j].mean < 0 ||
+                    (*target)[j].count < 0)
+                    throw std::runtime_error("Invalid checkpoint pseudocost");
+            }
+        }
+        const auto &stats = saved.at("statistics");
+        out.nodes = stats.at("nodes");
+        out.iterations = stats.at("iterations");
+        out.restarts = stats.at("restarts");
+        out.cuts_added = stats.at("cuts_added");
+        out.cut_rounds = stats.at("cut_rounds");
+        out.local_cuts_added = stats.at("local_cuts_added");
+        out.bounds_tightened = stats.at("bounds_tightened");
+        out.strong_branch_probes = stats.at("strong_branch_probes");
+        out.pump_rounds = stats.at("pump_rounds");
+        out.rins_calls = stats.at("rins_calls");
+        out.heuristic_nodes = stats.at("heuristic_nodes");
+        out.conflicts_learned = stats.at("conflicts_learned");
+        out.conflicts_pruned = stats.at("conflicts_pruned");
+        out.local_branching_calls = stats.at("local_branching_calls");
+        if (out.nodes < 0 || out.iterations < 0)
+            throw std::runtime_error("Negative checkpoint statistics");
+    }
     while (!queue.empty() && out.nodes < options.node_limit) {
-        if (interrupted) {
+        if (out.nodes % options.checkpoint_nodes == 0)
+            snapshot();
+        if (stop_requested(options)) {
             out.status = "INTERRUPTED";
             break;
         }
@@ -237,18 +559,131 @@ Result solve_mip(const Model &original, const Options &options) {
             closed = std::min(closed, node.bound);
             continue;
         }
-        if (options.presolve && !propagate(original, node, out.bounds_tightened)) {
+        bool conflict_pruned = false;
+        for (const auto &conflict : conflicts) {
+            bool matches = true;
+            for (auto [j, v] : conflict)
+                matches &= node.lb[j] == v && node.ub[j] == v;
+            if (matches) {
+                conflict_pruned = true;
+                break;
+            }
+        }
+        if (conflict_pruned) {
+            out.conflicts_pruned++;
             out.nodes++;
             continue;
+        }
+        if (options.gpu_presolve) {
+            auto old_lb = node.lb, old_ub = node.ub;
+            if (!cuda_propagate_integer_bounds(original, node.lb, node.ub)) {
+                learn_conflict(node);
+                out.nodes++;
+                continue;
+            }
+            for (size_t j = 0; j < node.lb.size(); ++j)
+                out.bounds_tightened += (old_lb[j] != node.lb[j]) + (old_ub[j] != node.ub[j]);
+        }
+        if (options.presolve && !propagate(original, node, out.bounds_tightened)) {
+            learn_conflict(node);
+            out.nodes++;
+            continue;
+        }
+        relaxation = root_relaxation;
+        if (options.cuts) {
+            std::stable_sort(cut_pool.begin(), cut_pool.end(),
+                             [](const auto &a, const auto &b) { return a.efficacy > b.efficacy; });
+            for (size_t i = 0; i < std::min<size_t>(16, cut_pool.size()); ++i) {
+                append_cut(relaxation, cut_pool[i]);
+                cut_pool[i].uses++;
+            }
         }
         relaxation.lb = node.lb;
         relaxation.ub = node.ub;
         Options o = options;
+        o.checkpoint_path.clear();
+        o.resume_path.clear();
         o.initial_x = node.x;
+        o.initial_basis = node.basis;
+        o.basis_fingerprint = node.basis_fingerprint;
         o.initial_y = node.y;
+        if (!o.initial_y.empty())
+            o.initial_y.resize(relaxation.rl.size(), 0);
         o.time_limit = std::max(0., options.time_limit - elapsed(start));
         o.verbose = false;
         auto r = solve_continuous(relaxation, o);
+        // Bounds used to derive these cuts apply only to this node. They are discarded
+        // on exit; only their certified relaxation lower bound is inherited by children.
+        for (int round = 0; options.cuts && round < 2 && !stop_requested(options) &&
+                            elapsed(start) < options.time_limit && r.status != "INFEASIBLE" &&
+                            r.accuracy.finite && r.x.size() == original.c.size();
+             ++round) {
+            Model separated = relaxation;
+            separated.types = original.types;
+            int added = add_mir_cuts(separated, 16, &r.x);
+            if (!added)
+                break;
+            account_heuristic(r);
+            out.cuts_added += added;
+            out.local_cuts_added += added;
+            out.cut_rounds++;
+            std::fill(separated.types.begin(), separated.types.end(), VarType::Continuous);
+            relaxation = std::move(separated);
+            o.initial_x = r.x;
+            o.initial_y = r.y;
+            o.initial_y.resize(relaxation.rl.size(), 0);
+            o.time_limit = std::max(0., options.time_limit - elapsed(start));
+            r = solve_continuous(relaxation, o);
+        }
+        if (options.cuts && r.accuracy.finite && r.x.size() == original.c.size()) {
+            for (auto &cut : cut_pool) {
+                long double activity = 0, norm = 0;
+                for (auto [j, a] : cut.terms) {
+                    activity += (long double)a * r.x[j];
+                    norm += (long double)a * a;
+                }
+                cut.efficacy = double(std::max({0.L, (long double)cut.lower - activity,
+                                                activity - (long double)cut.upper}) /
+                                      std::max(1.L, std::sqrt(norm)));
+                cut.age = cut.efficacy > 1e-7 ? 0 : cut.age + 1;
+            }
+            cut_pool.erase(std::remove_if(cut_pool.begin(), cut_pool.end(),
+                                          [](const auto &cut) { return cut.age > 10; }),
+                           cut_pool.end());
+            // Global candidates are derived only from root bounds, never node bounds.
+            auto global = root_relaxation;
+            global.types = original.types;
+            size_t first = global.rl.size();
+            add_mir_cuts(global, 16, &r.x);
+            for (size_t row = first; row < global.rl.size(); ++row) {
+                PooledCut cut;
+                cut.lower = global.rl[row];
+                cut.upper = global.ru[row];
+                long double activity = 0, norm = 0;
+                for (auto k = global.A.ptr[row]; k < global.A.ptr[row + 1]; ++k) {
+                    auto j = global.A.index[k];
+                    double a = global.A.value[k];
+                    cut.terms.push_back({j, a});
+                    activity += (long double)a * r.x[j];
+                    norm += (long double)a * a;
+                }
+                cut.efficacy = double(std::max({0.L, (long double)cut.lower - activity,
+                                                activity - (long double)cut.upper}) /
+                                      std::max(1.L, std::sqrt(norm)));
+                bool duplicate = false;
+                for (const auto &old : cut_pool)
+                    if (old.terms == cut.terms && old.lower == cut.lower && old.upper == cut.upper)
+                        duplicate = true;
+                if (!duplicate) {
+                    if (cut_pool.size() == 64)
+                        cut_pool.erase(std::min_element(
+                            cut_pool.begin(), cut_pool.end(),
+                            [](const auto &a, const auto &b) { return a.efficacy < b.efficacy; }));
+                    cut_pool.push_back(std::move(cut));
+                    out.cuts_added++;
+                }
+            }
+        }
         out.nodes++;
         out.iterations += r.iterations;
         out.restarts += r.restarts;
@@ -275,9 +710,16 @@ Result solve_mip(const Model &original, const Options &options) {
             auto &cost = node.branch_up ? up[node.branch_variable] : down[node.branch_variable];
             cost.observe(node.parent_objective, r.accuracy.objective, node.branch_distance);
         }
-        if (r.status == "INFEASIBLE")
+        if (r.status == "INFEASIBLE") {
+            learn_conflict(node);
             continue;
+        }
         double lower = std::max(node.bound, r.accuracy.lower_bound);
+        if (options.verbose)
+            std::cerr << "node=" << node.id << " relaxation_status=" << r.status
+                      << " objective=" << r.accuracy.objective
+                      << " safe_bound=" << r.accuracy.lower_bound << " kkt=" << r.accuracy.kkt
+                      << " x=" << r.x.size() << " y=" << r.y.size() << '\n';
         if (cutoff(lower)) {
             closed = std::min(closed, lower);
             continue;
@@ -297,6 +739,8 @@ Result solve_mip(const Model &original, const Options &options) {
                         std::clamp(std::round(r.x[j]), node.lb[j], node.ub[j]);
             Options ro = o;
             ro.initial_x = r.x;
+            ro.initial_basis = r.basis;
+            ro.basis_fingerprint = r.basis_fingerprint;
             ro.initial_y = r.y;
             ro.iteration_limit = std::min<int64_t>(o.iteration_limit, 5000);
             ro.time_limit = std::max(0., options.time_limit - elapsed(start));
@@ -318,7 +762,8 @@ Result solve_mip(const Model &original, const Options &options) {
             (options.primal_heuristic == "pump" || options.primal_heuristic == "all")) {
             auto point = r.x;
             std::set<std::vector<double>> visited;
-            for (int round = 0; round < 8 && !interrupted && elapsed(start) < options.time_limit;
+            for (int round = 0;
+                 round < 8 && !stop_requested(options) && elapsed(start) < options.time_limit;
                  ++round) {
                 auto target = point;
                 std::vector<double> key;
@@ -372,7 +817,8 @@ Result solve_mip(const Model &original, const Options &options) {
         }
         if (std::isfinite(incumbent) && (out.nodes == 1 || out.nodes % 10 == 0) &&
             (options.primal_heuristic == "rins" || options.primal_heuristic == "all") &&
-            out.nodes < options.node_limit && !interrupted && elapsed(start) < options.time_limit) {
+            out.nodes < options.node_limit && !stop_requested(options) &&
+            elapsed(start) < options.time_limit) {
             Model neighborhood = relaxation;
             neighborhood.types = original.types;
             size_t fixed = 0;
@@ -386,6 +832,8 @@ Result solve_mip(const Model &original, const Options &options) {
             if (fixed) {
                 Options no = o;
                 no.primal_heuristic = "repair";
+                no.checkpoint_path.clear();
+                no.resume_path.clear();
                 no.cuts = false;
                 no.initial_x = r.x;
                 no.initial_y = r.y;
@@ -400,6 +848,53 @@ Result solve_mip(const Model &original, const Options &options) {
                     install(nr.x, nr.y);
                 // Neighborhood bounds concern only its restricted feasible set.
                 // They never enter the global tree's lower bound or cutoff logic.
+            }
+        }
+        if (std::isfinite(incumbent) && (out.nodes == 1 || out.nodes % 20 == 0) &&
+            (options.primal_heuristic == "local" || options.primal_heuristic == "all") &&
+            out.nodes < options.node_limit && !stop_requested(options) &&
+            elapsed(start) < options.time_limit) {
+            Model neighborhood = relaxation;
+            neighborhood.types = original.types;
+            std::vector<Entry> entries;
+            for (int64_t i = 0; i < neighborhood.A.rows; ++i)
+                for (auto k = neighborhood.A.ptr[i]; k < neighborhood.A.ptr[i + 1]; ++k)
+                    entries.push_back({i, neighborhood.A.index[k], neighborhood.A.value[k]});
+            int ones = 0, binaries = 0;
+            auto row = neighborhood.A.rows;
+            for (size_t j = 0; j < original.c.size(); ++j)
+                if (original.types[j] == VarType::Binary) {
+                    bool one = out.x[j] > .5;
+                    ones += one;
+                    binaries++;
+                    entries.push_back({row, int64_t(j), one ? -1. : 1.});
+                }
+            if (binaries) {
+                neighborhood.rl.push_back(-inf);
+                neighborhood.ru.push_back(std::min(5, std::max(1, binaries / 4)) - ones);
+                std::string name = "vantage_local_branching";
+                while (std::find(neighborhood.row_names.begin(), neighborhood.row_names.end(),
+                                 name) != neighborhood.row_names.end())
+                    name += "_";
+                neighborhood.row_names.push_back(name);
+                neighborhood.A = Sparse::build(neighborhood.rl.size(), neighborhood.c.size(),
+                                               std::move(entries));
+                Options no = o;
+                no.primal_heuristic = "repair";
+                no.cuts = false;
+                no.checkpoint_path.clear();
+                no.resume_path.clear();
+                no.initial_x = out.x;
+                no.initial_y.assign(neighborhood.rl.size(), 0);
+                no.node_limit = std::min<int64_t>(20, options.node_limit - out.nodes);
+                no.time_limit = std::max(0., options.time_limit - elapsed(start));
+                auto candidate = solve_mip(neighborhood, no);
+                account_heuristic(candidate);
+                out.local_branching_calls++;
+                out.nodes += candidate.nodes;
+                out.heuristic_nodes += candidate.nodes;
+                if (candidate.x.size() == original.c.size())
+                    install(candidate.x, candidate.y);
             }
         }
         if (cutoff(lower)) {
@@ -419,6 +914,11 @@ Result solve_mip(const Model &original, const Options &options) {
             }
         // An approximately integral primal is not an optimality proof. Keep unresolved leaves.
         if (branch < 0) {
+            if (options.verbose)
+                std::cerr << "unresolved_node=" << node.id << " relaxation_status=" << r.status
+                          << " kkt=" << r.accuracy.kkt << " primal=" << r.accuracy.primal
+                          << " objective=" << r.accuracy.objective << " bound=" << lower
+                          << " message=" << r.message << '\n';
             unresolved = std::min(unresolved, lower);
             unresolved_count++;
             continue;
@@ -433,6 +933,34 @@ Result solve_mip(const Model &original, const Options &options) {
                         candidates.emplace_back(-f, j);
                 }
             std::sort(candidates.begin(), candidates.end());
+            std::vector<Result> batched;
+            std::vector<std::array<int, 2>> batch_index(candidates.size(), {-1, -1});
+            if (options.batch_strong_branching && r.status == "OPTIMAL") {
+                std::vector<std::vector<double>> lows, upper_boxes;
+                for (size_t rank = 0; rank < std::min<size_t>(4, candidates.size()); ++rank) {
+                    auto j = candidates[rank].second;
+                    double v = std::clamp(r.x[j], node.lb[j], node.ub[j]);
+                    for (int direction = 0; direction < 2; ++direction) {
+                        if ((direction ? up[j] : down[j]).count >= 2)
+                            continue;
+                        batch_index[rank][direction] = int(lows.size());
+                        lows.push_back(node.lb);
+                        upper_boxes.push_back(node.ub);
+                        if (direction)
+                            lows.back()[j] = std::ceil(v);
+                        else
+                            upper_boxes.back()[j] = std::floor(v);
+                    }
+                }
+                if (!lows.empty()) {
+                    Options po = o;
+                    po.initial_x = r.x;
+                    po.initial_y = r.y;
+                    po.iteration_limit = std::min<int64_t>(o.iteration_limit, 1000);
+                    po.time_limit = std::max(0., options.time_limit - elapsed(start));
+                    batched = cuda_batch_relaxations(relaxation, lows, upper_boxes, po);
+                }
+            }
             double best_score = -1;
             for (size_t rank = 0; rank < candidates.size(); rank++) {
                 auto j = candidates[rank].second;
@@ -443,7 +971,8 @@ Result solve_mip(const Model &original, const Options &options) {
                 if (rank < 4 && r.status == "OPTIMAL")
                     for (int direction = 0; direction < 2; direction++) {
                         auto &cost = direction ? up[j] : down[j];
-                        if (cost.count >= 2 || interrupted || elapsed(start) >= options.time_limit)
+                        if (cost.count >= 2 || stop_requested(options) ||
+                            elapsed(start) >= options.time_limit)
                             continue;
                         Model probe = relaxation;
                         if (direction)
@@ -452,10 +981,14 @@ Result solve_mip(const Model &original, const Options &options) {
                             probe.ub[j] = std::floor(v);
                         Options po = o;
                         po.initial_x = r.x;
+                        po.initial_basis = r.basis;
+                        po.basis_fingerprint = r.basis_fingerprint;
                         po.initial_y = r.y;
                         po.iteration_limit = std::min<int64_t>(o.iteration_limit, 1000);
                         po.time_limit = std::max(0., options.time_limit - elapsed(start));
-                        auto pr = solve_continuous(probe, po);
+                        auto pr = batch_index[rank][direction] >= 0
+                                      ? batched.at(batch_index[rank][direction])
+                                      : solve_continuous(probe, po);
                         out.strong_branch_probes++;
                         out.iterations += pr.iterations;
                         out.restarts += pr.restarts;
@@ -483,10 +1016,17 @@ Result solve_mip(const Model &original, const Options &options) {
         }
         double value = std::clamp(r.x[branch], node.lb[branch], node.ub[branch]);
         Node left = node, right = node;
+        left.id = next_node_id++;
+        right.id = next_node_id++;
         left.bound = right.bound = lower;
         left.depth = right.depth = node.depth + 1;
         left.x = right.x = r.x;
+        left.basis = right.basis = r.basis;
+        left.basis_fingerprint = right.basis_fingerprint = r.basis_fingerprint;
         left.y = right.y = r.y;
+        // Local row multipliers must never be assigned to another node's rows.
+        left.y.resize(root_relaxation.rl.size(), 0);
+        right.y.resize(root_relaxation.rl.size(), 0);
         left.branch_variable = right.branch_variable = branch;
         left.branch_up = false;
         right.branch_up = true;
@@ -532,6 +1072,7 @@ Result solve_mip(const Model &original, const Options &options) {
     if (out.status == "UNKNOWN")
         out.message =
             "Unresolved LP leaves retained; no unverified primal objective was used to prune";
+    snapshot();
     out.seconds = elapsed(start);
     return out;
 }

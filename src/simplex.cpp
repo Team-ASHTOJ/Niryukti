@@ -1,5 +1,7 @@
 #include "internal.hpp"
+#include <cstring>
 #include <numeric>
+#include <sstream>
 #include <stdexcept>
 #ifdef VANTAGE_SPARSE_LU
 #include <Eigen/SparseLU>
@@ -246,7 +248,7 @@ static Result solve_simplex_raw(const Model &m, const Options &o) {
 #else
     r.message = "Revised primal simplex; sparse pricing, small dense basis factorization";
 #endif
-    if (m.is_qp() || o.device == "cuda") {
+    if (m.is_qp() || gpu_request(o)) {
         r.status = "UNSUPPORTED";
         r.message = "CPU simplex supports LP relaxations only";
         return r;
@@ -261,7 +263,50 @@ static Result solve_simplex_raw(const Model &m, const Options &o) {
     }
     r.preprocess_seconds = elapsed(start);
     int rows = s.b.size(), cols = s.c.size();
+    // Explicit basis state: no hidden cross-model cache. Matrix structure, not RHS,
+    // identifies compatible reoptimization; dual feasibility is checked again below.
+    uint64_t hash = 14695981039346656037ULL;
+    auto mix = [&](const auto &v) {
+        const auto *bytes = reinterpret_cast<const unsigned char *>(&v);
+        for (size_t k = 0; k < sizeof(v); ++k) {
+            hash ^= bytes[k];
+            hash *= 1099511628211ULL;
+        }
+    };
+    mix(s.columns.rows);
+    mix(s.columns.cols);
+    for (auto v : s.columns.ptr)
+        mix(v);
+    for (auto v : s.columns.index)
+        mix(v);
+    for (auto v : s.columns.value)
+        mix(v);
+    std::ostringstream fingerprint;
+    fingerprint << std::hex << hash;
+    r.basis_fingerprint = fingerprint.str();
+    bool warm_basis =
+        o.initial_basis.size() == size_t(rows) && o.basis_fingerprint == r.basis_fingerprint;
+    if (warm_basis) {
+        std::vector<bool> seen(cols);
+        for (auto j : o.initial_basis) {
+            if (j < 0 || j >= cols || seen[j]) {
+                warm_basis = false;
+                break;
+            }
+            seen[j] = true;
+        }
+        if (warm_basis)
+            s.basis.assign(o.initial_basis.begin(), o.initial_basis.end());
+    }
     Factor factor(rows);
+    if (warm_basis) {
+        try {
+            factor.factor(s.columns, s.basis);
+        } catch (const std::exception &) {
+            s = standardize(m);
+            warm_basis = false;
+        }
+    }
     std::vector<Eta> etas;
     auto solveB = [&](const std::vector<double> &rhs, bool transpose = false) {
         auto v = rhs;
@@ -290,6 +335,7 @@ static Result solve_simplex_raw(const Model &m, const Options &o) {
     for (auto j : s.basis)
         basic[j] = true;
     auto checkpoint = [&]() {
+        r.basis.assign(s.basis.begin(), s.basis.end());
         r.x = s.shift;
         r.y.assign(m.rl.size(), 0);
         for (int i = 0; i < rows; ++i) {
@@ -298,6 +344,15 @@ static Result solve_simplex_raw(const Model &m, const Options &o) {
                 r.x[s.original[j]] += s.sign[j] * xb[i];
             if (s.row_map[i] >= 0)
                 r.y[s.row_map[i]] -= s.row_sign[i] * pi[i];
+        }
+        // Basis solves can produce tiny wrong-sign multipliers on one-sided rows.
+        // Project into the exact dual domain before evaluating the box lower bound;
+        // KKT is independently rechecked, so substantive errors cannot be hidden.
+        for (size_t i = 0; i < r.y.size(); ++i) {
+            if (!std::isfinite(m.rl[i]))
+                r.y[i] = std::max(0., r.y[i]);
+            if (!std::isfinite(m.ru[i]))
+                r.y[i] = std::min(0., r.y[i]);
         }
         auto tick = Clock::now();
         r.accuracy = verify(m, r.x, r.y);
@@ -314,6 +369,104 @@ static Result solve_simplex_raw(const Model &m, const Options &o) {
         }
     };
     try {
+        if (warm_basis) {
+            // A saved optimal basis remains dual feasible under RHS/bound changes.
+            // Repair negative basic values with revised dual pivots; cost changes
+            // that break dual feasibility restart the independent primal phases.
+            bool feasible_dual = true;
+            auto prices = [&]() {
+                std::vector<double> cb(rows);
+                for (int i = 0; i < rows; ++i)
+                    cb[i] = s.c[s.basis[i]];
+                pi = solveB(cb, true);
+                std::vector<double> reduced(cols);
+                for (int j = 0; j < cols; ++j) {
+                    reduced[j] = s.c[j];
+                    for (auto k = s.columns.ptr[j]; k < s.columns.ptr[j + 1]; ++k)
+                        reduced[j] -= s.columns.value[k] * pi[s.columns.index[k]];
+                    if (!basic[j] && !s.artificial[j] && reduced[j] < -1e-10)
+                        feasible_dual = false;
+                }
+                return reduced;
+            };
+            auto reduced = prices();
+            if (feasible_dual) {
+                r.method_selected = "revised-dual-simplex";
+                r.message =
+                    "Explicit compatible basis; revised dual ratio tests and product-form updates";
+                while (true) {
+                    if (stop_requested(o) || elapsed(start) >= o.time_limit ||
+                        r.iterations >= o.iteration_limit) {
+                        r.status = stop_requested(o)                ? "INTERRUPTED"
+                                   : elapsed(start) >= o.time_limit ? "TIME_LIMIT"
+                                                                    : "ITERATION_LIMIT";
+                        xb = solveB(s.b);
+                        checkpoint();
+                        return r;
+                    }
+                    xb = solveB(s.b);
+                    int leaving = -1;
+                    for (int i = 0; i < rows; ++i)
+                        if (xb[i] < -1e-10 && (leaving < 0 || s.basis[i] < s.basis[leaving]))
+                            leaving = i;
+                    if (leaving < 0) {
+                        checkpoint();
+                        r.status = r.accuracy.finite && r.accuracy.kkt <= o.tol ? "OPTIMAL"
+                                                                                : "NUMERICAL_ERROR";
+                        return r;
+                    }
+                    std::vector<double> unit(rows);
+                    unit[leaving] = 1;
+                    auto row = solveB(unit, true);
+                    int entering = -1;
+                    double ratio = inf;
+                    for (int j = 0; j < cols; ++j)
+                        if (!basic[j] && !s.artificial[j]) {
+                            double coefficient = 0;
+                            for (auto k = s.columns.ptr[j]; k < s.columns.ptr[j + 1]; ++k)
+                                coefficient += s.columns.value[k] * row[s.columns.index[k]];
+                            if (coefficient < -1e-12) {
+                                double candidate = std::max(0., reduced[j]) / (-coefficient);
+                                if (candidate < ratio - 1e-12 ||
+                                    (std::abs(candidate - ratio) <= 1e-12 &&
+                                     (entering < 0 || j < entering))) {
+                                    entering = j;
+                                    ratio = candidate;
+                                }
+                            }
+                        }
+                    if (entering < 0) {
+                        pi = row;
+                        checkpoint();
+                        auto margin = Verifier(m).infeasibility_bound(r.y);
+                        r.status = margin > 0 ? "INFEASIBLE" : "UNKNOWN";
+                        if (margin > 0) {
+                            r.infeasibility_ray = r.y;
+                            r.certificate_margin = margin;
+                        }
+                        return r;
+                    }
+                    std::vector<double> rhs(rows);
+                    for (auto k = s.columns.ptr[entering]; k < s.columns.ptr[entering + 1]; ++k)
+                        rhs[s.columns.index[k]] = s.columns.value[k];
+                    pivot(entering, leaving, solveB(rhs));
+                    r.iterations++;
+                    feasible_dual = true;
+                    reduced = prices();
+                    if (!feasible_dual)
+                        throw std::runtime_error("Dual simplex lost dual feasibility");
+                }
+            }
+            s = standardize(m);
+            std::fill(basic.begin(), basic.end(), false);
+            for (auto j : s.basis)
+                basic[j] = true;
+            factor.factor(s.columns, s.basis);
+            etas.clear();
+        }
+        if (o.method == "dual-simplex")
+            r.message =
+                "Dual simplex cold start uses independent primal two-phase basis initialization";
         for (int phase = 1; phase <= 2; ++phase) {
             std::vector<double> cost = s.c;
             if (phase == 1)
@@ -321,7 +474,7 @@ static Result solve_simplex_raw(const Model &m, const Options &o) {
                     cost[j] = s.artificial[j] ? 1 : 0;
             int degenerate_pivots = 0;
             while (true) {
-                if (interrupted) {
+                if (stop_requested(o)) {
                     r.status = "INTERRUPTED";
                     checkpoint();
                     return r;
@@ -430,8 +583,8 @@ static Result solve_simplex_raw(const Model &m, const Options &o) {
                     if (s.artificial[s.basis[i]])
                         for (int j = 0; j < cols; ++j)
                             if (!basic[j] && !s.artificial[j]) {
-                                if (interrupted || elapsed(start) >= o.time_limit) {
-                                    r.status = interrupted ? "INTERRUPTED" : "TIME_LIMIT";
+                                if (stop_requested(o) || elapsed(start) >= o.time_limit) {
+                                    r.status = stop_requested(o) ? "INTERRUPTED" : "TIME_LIMIT";
                                     checkpoint();
                                     return r;
                                 }
@@ -462,7 +615,7 @@ static Result solve_simplex_raw(const Model &m, const Options &o) {
     return r;
 }
 Result solve_simplex(const Model &original, const Options &o) {
-    if (original.is_qp() || o.device == "cuda")
+    if (original.is_qp() || gpu_request(o))
         return solve_simplex_raw(original, o);
     auto start = Clock::now();
     auto p = prepare(original, o);
@@ -471,6 +624,9 @@ Result solve_simplex(const Model &original, const Options &o) {
         Result r;
         r.status = p.failure;
         r.message = p.reason;
+        r.infeasibility_ray = p.failure_ray;
+        if (!r.infeasibility_ray.empty())
+            r.certificate_margin = Verifier(original).infeasibility_bound(r.infeasibility_ray);
         r.method_selected = "revised-primal-simplex";
         r.preprocess_seconds = r.seconds = preprocess_seconds;
         return r;

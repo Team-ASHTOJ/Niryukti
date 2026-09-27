@@ -21,7 +21,7 @@ from urllib.parse import unquote, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / 'dashboard/static'
-BINARY = ROOT / 'build/vantage'
+BINARY = Path(os.environ.get('VANTAGE_BINARY', str(ROOT / 'build/vantage')))
 STORE = ROOT / 'results/dashboard'
 TOKEN = secrets.token_urlsafe(32)
 LOCK = threading.Lock()
@@ -40,7 +40,15 @@ CATALOG = [
     ('afiro', 'AFIRO', 'LP', 'Netlib', 'datasets/afiro.mps', 'A small public LP used for independent numerical validation.'),
     ('adlittle', 'ADLITTLE', 'LP', 'Netlib', 'datasets/adlittle.mps', 'A public LP with 56 rows and 97 variables.'),
     ('israel', 'ISRAEL', 'LP', 'Netlib', 'datasets/israel.mps', 'A harder public LP used to track convergence improvements.'),
-    ('e226', 'E226', 'LP', 'Netlib', 'datasets/e226.mps', 'A harder public instance retained in the report despite incomplete convergence.'),
+    ('e226', 'E226', 'LP', 'Netlib', 'datasets/e226.mps', 'Numerical recovery is verified in the current repeated campaign; performance remains behind HiGHS.'),
+    ('planted_1m', 'Million-variable sparse LP', 'LP', 'Scalability', 'datasets/public/stress/planted_1m.mps', 'Synthetic planted cyclic LP: 1,000,000 variables; known optimum 3,437,485. Single-run screening, not MRPL data.'),
+    ('dfl001', 'DFL001', 'LP', 'Netlib', 'datasets/public/netlib/dfl001.mps', 'Public convergence stress case; CPU/CUDA PDHG compared with HiGHS.'),
+    ('stocfor2', 'STOCFOR2', 'LP', 'Netlib', 'datasets/public/netlib/stocfor2.mps', 'Public stochastic-programming LP, retained whether solved or limited.'),
+    ('rail507_lp', 'RAIL507 · LP relaxation', 'LP', 'MIPLIB relaxations', 'datasets/public/relaxations/rail507_lp.mps', 'Continuous relaxation of the public railway MILP; not an integer solution.'),
+    ('rail03_lp', 'RAIL03 · LP relaxation', 'LP', 'MIPLIB relaxations', 'datasets/public/relaxations/rail03_lp.mps', 'Approximately 759,000 variables. Convergence stress; parser/setup costs are included.'),
+    ('rail507', 'RAIL507', 'MILP', 'MIPLIB', 'datasets/public/miplib/rail507.mps', 'Public railway MILP compared against HiGHS and SCIP, with incumbent and global gap.'),
+    ('rail03', 'RAIL03', 'MILP', 'MIPLIB', 'datasets/stress_public/miplib/rail03.mps', 'Large public railway MILP; single-run 60-second screening is not a full MIPLIB campaign.'),
+    ('ns1644855', 'NS1644855', 'MILP', 'MIPLIB', 'datasets/stress_public/miplib/ns1644855.mps', 'Public MILP with over two million matrix nonzeros.'),
     ('refinery_large', 'Large-scale blending', 'LP', 'Scalability', 'datasets/refinery_large.mps', '46,720 variables across synthetic, largely independent refinery periods.'),
 ]
 
@@ -84,56 +92,55 @@ def median(values):
 
 
 def benchmarks():
-    cases = {}
-    sources = []
-    # Prefer the public campaign for AFIRO; never count its demo repetitions as a new case.
-    campaigns = ['submission-final'] if (ROOT/'results/submission-final/summary.json').exists() else ['phase2-final'] if (ROOT/'results/phase2-final/summary.json').exists() else ['demo', 'netlib', 'scalability-final']
+    cases, sources = {}, []
+    base = next((v for v in ['completion_final_20260927','completion_20260927','submission-final','phase2-final'] if (ROOT/'results'/v/'summary.json').exists()), None)
+    campaigns = [base] if base else ['demo','netlib','scalability-final']
+    campaigns += ['stress_lp_20260927/reverified','stress_mip_corrected_20260927','stress_highs_ipm_20260927']
     for suite in campaigns:
-        folder = ROOT / 'results' / suite
-        if not (folder / 'manifest.json').exists(): continue
-        manifest = json.loads((folder / 'manifest.json').read_text())
-        sources.append(dict(suite=suite, timestamp=manifest.get('timestamp'), threads=manifest.get('arguments', {}).get('threads'),
-                            iterations=manifest.get('arguments', {}).get('iterations',100000), tolerance=manifest.get('arguments', {}).get('tol'), time_limit=manifest.get('arguments', {}).get('time_limit'),
-                            binary_sha256=manifest.get('binary_sha256'), cpu=manifest.get('cpu_info'), devices=manifest.get('devices')))
-        groups = {}
-        for path in sorted((folder / 'raw').glob('*.json')):
-            try: raw = json.loads(path.read_text())
-            except (ValueError, OSError): continue
-            r = raw.get('record')
-            if not r or r.get('warmup') or r.get('run', -1) < 0: continue
-            key = Path(r['instance']).stem
-            groups.setdefault(key, {}).setdefault(r['solver'], []).append((r, raw.get('result', {})))
-        for key, engines in groups.items():
-            entry = next((v for v in CATALOG if v[0] == key), None)
-            sample = next(iter(engines.values()))[0][0]
-            case = dict(id=key, name=entry[1] if entry else key, type=entry[2] if entry else sample.get('problem_type') or 'LP', category=entry[3] if entry else 'QPLIB' if sample['instance'].endswith('.qplib') else 'Public benchmarks',
-                        suite=suite, rows=sample.get('rows'), columns=sample.get('columns'), nonzeros=sample.get('nonzeros'), engines={})
-            for engine, values in engines.items():
-                records = [r for r, _ in values]
-                statuses = list(dict.fromkeys(r['status'] for r in records))
-                case['engines'][engine] = dict(status=statuses[0] if len(statuses) == 1 else 'MIXED', statuses=statuses,
-                    runs=len(records), solved=sum(r['status']=='OPTIMAL' for r in records),
-                    seconds=median([number(r.get('end_to_end_seconds')) for r in records]),
-                    iteration_seconds=median([number(r.get('iteration_seconds')) for r in records]),
-                    wall_seconds=median([number(r.get('process_wall_seconds')) for r in records]),
-                    objective=median([number(r.get('objective')) for r in records]),
-                    primal=max((number(r.get('primal_residual')) for r in records if number(r.get('primal_residual')) is not None), default=None),
-                    kkt=max((number(r.get('kkt_error')) for r in records if number(r.get('kkt_error')) is not None), default=None),
-                    gap=median([number(d.get('mip', {}).get('relative_gap', d.get('mip_gap'))) for _, d in values]),
-                    iterations=median([number(r.get('iterations')) for r in records]),
-                    min_seconds=min((number(r.get('end_to_end_seconds')) for r in records if number(r.get('end_to_end_seconds')) is not None), default=None),
-                    max_seconds=max((number(r.get('end_to_end_seconds')) for r in records if number(r.get('end_to_end_seconds')) is not None), default=None))
-            baseline = case['engines'].get('highs', {})
-            for engine in case['engines'].values():
-                obj, ref = engine['objective'], baseline.get('objective')
-                engine['objective_error'] = abs(obj-ref)/max(1, abs(ref)) if obj is not None and ref is not None else None
-            cases[key] = case
-    ordered = sorted(cases.values(), key=lambda x: next((i for i,v in enumerate(CATALOG) if v[0]==x['id']), 99))
-    counts = {engine: sum(c['engines'].get(engine, {}).get('status') == 'OPTIMAL' for c in ordered) for engine in ['cpu','cuda','highs']}
-    large = cases.get('refinery_large', {}).get('engines', {})
-    speedup = large['cpu']['seconds']/large['cuda']['seconds'] if all(large.get(k, {}).get('status') == 'OPTIMAL' and large[k].get('seconds') for k in ('cpu','cuda')) else None
-    errors = [e['objective_error'] for c in ordered for k,e in c['engines'].items() if k!='highs' and e['status']=='OPTIMAL' and e['objective_error'] is not None]
-    return dict(cases=ordered, sources=sources, counts=counts, total=len(ordered), speedup=speedup, max_objective_error=max(errors, default=None))
+        folder = ROOT/'results'/suite
+        if not (folder/'manifest.json').exists() or not ((folder/'runs.csv').exists() or (folder/'summary.json').exists()):
+            # Legacy small fixtures may contain raw records only.
+            if suite not in ('demo','netlib','scalability-final'):continue
+            if not (folder/'manifest.json').exists():continue
+        manifest = json.loads((folder/'manifest.json').read_text()); options=manifest.get('arguments',{})
+        sources.append(dict(suite=suite,timestamp=manifest.get('timestamp'),threads=options.get('threads'),iterations=options.get('iterations',100000),tolerance=options.get('tol'),time_limit=options.get('time_limit'),runs=options.get('runs',3),method=options.get('method'),exploratory=options.get('runs',3)==1,binary_sha256=manifest.get('binary_sha256'),cpu=manifest.get('cpu_info'),devices=manifest.get('devices'),verification_replayed=bool(manifest.get('verification_replay'))))
+        if (folder/'runs.csv').exists():
+            with (folder/'runs.csv').open() as f:records=list(csv.DictReader(f))
+        else:
+            records=[]
+            for path in sorted((folder/'raw').glob('*.json')):
+                try:
+                    raw=json.loads(path.read_text()); r=raw.get('record')
+                    if r and not r.get('warmup') and r.get('run',-1)>=0:records.append(r)
+                except (ValueError,OSError):continue
+        groups={}
+        for r in records:
+            groups.setdefault(Path(r['instance']).stem,{}).setdefault(r['solver'],[]).append(r)
+        for key,engines in groups.items():
+            entry=next((v for v in CATALOG if v[0]==key),None)
+            sample=next((r for vs in engines.values() for r in vs if number(r.get('columns')) is not None),next(iter(engines.values()))[0])
+            case=cases.setdefault(key,dict(id=key,name=entry[1] if entry else key,type=entry[2] if entry else sample.get('problem_type') or 'LP',category=entry[3] if entry else 'Public benchmarks',suite=suite,suites=[],rows=number(sample.get('rows')),columns=number(sample.get('columns')),nonzeros=number(sample.get('nonzeros')),engines={}))
+            case['suites'].append(suite)
+            for field in ('rows','columns','nonzeros'):
+                if case[field] is None:case[field]=number(sample.get(field))
+            for engine,rs in engines.items():
+                statuses=list(dict.fromkeys(r['status'] for r in rs))
+                case['engines'][engine]=dict(status=statuses[0] if len(statuses)==1 else 'MIXED',statuses=statuses,runs=len(rs),solved=sum(r['status']=='OPTIMAL' for r in rs),suite=suite,exploratory=options.get('runs',3)==1,verification_statuses=list(dict.fromkeys(r.get('verification_status') for r in rs if r.get('verification_status'))),
+                    seconds=median([number(r.get('end_to_end_seconds')) for r in rs]),iteration_seconds=median([number(r.get('iteration_seconds')) for r in rs]),wall_seconds=median([number(r.get('process_wall_seconds')) for r in rs]),objective=median([number(r.get('objective')) for r in rs]),primal=max((number(r.get('primal_residual')) for r in rs if number(r.get('primal_residual')) is not None),default=None),kkt=max((number(r.get('kkt_error')) for r in rs if number(r.get('kkt_error')) is not None),default=None),gap=median([number(r.get('mip_gap')) for r in rs]),best_bound=median([number(r.get('best_bound')) for r in rs]),nodes=median([number(r.get('nodes')) for r in rs]),iterations=median([number(r.get('iterations')) for r in rs]),min_seconds=min((number(r.get('end_to_end_seconds')) for r in rs if number(r.get('end_to_end_seconds')) is not None),default=None),max_seconds=max((number(r.get('end_to_end_seconds')) for r in rs if number(r.get('end_to_end_seconds')) is not None),default=None))
+    for case in cases.values():
+        baseline=next((case['engines'][k] for k in ('highs','highs-ipm','scip') if case['engines'].get(k,{}).get('status')=='OPTIMAL' and case['engines'][k].get('objective') is not None),{})
+        for engine in case['engines'].values():
+            obj,ref=engine['objective'],baseline.get('objective')
+            engine['objective_error']=abs(obj-ref)/max(1,abs(ref)) if case['type'] in ('LP','QP') and engine['status']=='OPTIMAL' and obj is not None and ref is not None else None
+    ordered=sorted(cases.values(),key=lambda c:next((i for i,v in enumerate(CATALOG) if v[0]==c['id']),99))
+    names=['cpu','cuda','highs','highs-ipm','scip']
+    counts={e:sum(c['engines'].get(e,{}).get('status')=='OPTIMAL' for c in ordered) for e in names}
+    available={e:sum(e in c['engines'] for c in ordered) for e in names}
+    large=cases.get('planted_1m',cases.get('refinery_large',{})).get('engines',{})
+    speedup=large['cpu']['seconds']/large['cuda']['seconds'] if all(large.get(k,{}).get('status')=='OPTIMAL' and large[k].get('seconds') for k in ('cpu','cuda')) else None
+    iteration_speedup=large['cpu']['iteration_seconds']/large['cuda']['iteration_seconds'] if all(large.get(k,{}).get('status')=='OPTIMAL' and large[k].get('iteration_seconds') for k in ('cpu','cuda')) else None
+    errors=[e['objective_error'] for c in ordered for k,e in c['engines'].items() if k in ('cpu','cuda') and e['objective_error'] is not None]
+    return dict(cases=ordered,sources=sources,counts=counts,available=available,total=len(ordered),speedup=speedup,iteration_speedup=iteration_speedup,speedup_model='planted_1m' if 'planted_1m' in cases else 'refinery_large',max_objective_error=max(errors,default=None))
 
 
 def catalog():
@@ -143,8 +150,17 @@ def catalog():
                  rows=by_id.get(v[0], {}).get('rows'), columns=by_id.get(v[0], {}).get('columns'), nonzeros=by_id.get(v[0], {}).get('nonzeros')) for v in CATALOG]
 
 
-def public_job(job):
-    return {k:v for k,v in job.items() if k not in ('process', 'path')}
+def public_job(job, full=False):
+    item={k:v for k,v in job.items() if k not in ('process','path')}
+    if not full and isinstance(item.get('result'),dict):
+        result=item['result'].copy();counts={}
+        for key,value in result.items():
+            if isinstance(value,list) and len(value)>256:
+                counts[key]=len(value);result[key]=value[:256]
+        if counts:
+            result['preview']=dict(limit=256,total_lengths=counts,note='Preview only. Download the original result for complete solution vectors.')
+        item['result']=result
+    return item
 
 
 
@@ -155,7 +171,7 @@ def run_arena(job, options):
     command=[str(python) if python.is_file() else sys.executable,str(ROOT/'benchmark/run.py'),str(job['path']),
              '--binary',str(BINARY),'--solvers','cpu,cuda,highs','--runs','3','--time-limit',str(options['time_limit']),
              '--threads',str(options['threads']),'--tol',str(options['tol']),'--iterations',str(options['iterations']),
-             '--method',options['method'],'--branching',options['branching'],'--node-selection',options['node_selection'],
+             '--method',options['method'],'--branching',options['branching'],'--node-selection',options['node_selection'],'--primal-heuristic',options.get('primal_heuristic','repair'),
              '--output',str(folder)]
     for key,flag in [('cuts','--cuts'),('gpu_monitor','--gpu-monitor')]:
         if options.get(key):command.append(flag)
@@ -195,14 +211,14 @@ def run_arena(job, options):
     finally:
         with LOCK:
             job['state']='finished';job['finished_at']=time.time();job.pop('process',None)
-        (STORE/(job['id']+'.json')).write_text(json.dumps(clean(public_job(job)),indent=2))
+        (STORE/(job['id']+'.json')).write_text(json.dumps(clean(public_job(job,full=True)),indent=2))
 
 
 def run_job(job, options):
     command = [str(BINARY), 'solve', str(job['path']), '--device', options['device'], '--tol', str(options['tol']),
                '--time-limit', str(options['time_limit']), '--threads', str(options['threads']),
                '--iterations', str(options.get('iterations',100000)), '--verbose']
-    command += ['--method', options.get('method', 'pdhg'), '--branching', options.get('branching', 'fractional'), '--node-selection', options.get('node_selection', 'best-bound')]
+    command += ['--method', options.get('method', 'pdhg'), '--branching', options.get('branching', 'fractional'), '--node-selection', options.get('node_selection', 'best-bound'), '--primal-heuristic',options.get('primal_heuristic','repair')]
     if options.get('cuts'): command += ['--cuts']
     if options.get('gpu_monitor') and options['device']=='cuda': command += ['--gpu-monitor']
     if not options.get('scaling', True): command += ['--scaling-passes', '0']
@@ -265,6 +281,13 @@ class Handler(BaseHTTPRequestHandler):
         if not self.local_host(): return
         try:
             path = unquote(urlparse(self.path).path)
+            if path.startswith('/api/docs/'):
+                name=path.removeprefix('/api/docs/')
+                if name not in ('solver_completion_20260927.md','stress_campaign_20260927.md','development_log.md'):
+                    return self.send(404,dict(error='Documentation unavailable'))
+                file=ROOT/'docs'/name
+                if not file.is_file():return self.send(404,dict(error='Documentation unavailable'))
+                return self.send(200,file.read_bytes(),'text/markdown; charset=utf-8',filename=name)
             if path == '/api/bootstrap':
                 return self.send(200, dict(token=TOKEN, models=catalog(), benchmarks=benchmarks(), binary_available=BINARY.exists()))
             if path == '/api/system': return self.send(200,gpu_telemetry())
@@ -286,7 +309,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/export.csv':
                 out=io.StringIO(); writer=csv.writer(out);writer.writerow(['instance','backend','status','runs','optimal_runs','median_seconds','objective','primal_residual','kkt_error','mip_gap','relative_objective_error'])
                 for c in benchmarks()['cases']:
-                    for backend,e in c['engines'].items(): writer.writerow([c['id'],backend,e['status'],e['runs'],e['solved'],e['seconds'],e['objective'],e['primal'],e['kkt'] if c['type']!='MILP' else '',e['gap'],e['objective_error']])
+                    for backend,e in c['engines'].items(): writer.writerow([c['id'],backend,e['status'],e['runs'],e['solved'],e['seconds'],e['objective'],e['primal'],e['kkt'] if c['type'] not in ('MILP','MIQP') else '',e['gap'],e['objective_error']])
                 return self.send(200,out.getvalue(),'text/csv; charset=utf-8','vantage-benchmarks.csv')
             if path.startswith('/arena/'):
                 parts=Path(path).parts
@@ -298,7 +321,7 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith('/reports/'):
 
                 rest=path.removeprefix('/reports/'); parts=Path(rest).parts
-                if not parts or parts[0] not in ('demo','netlib','scalability-final','phase2-final','submission-final'): return self.send(404, dict(error='Unknown report'))
+                if not parts or parts[0] not in ('demo','netlib','scalability-final','phase2-final','submission-final','completion_20260927','completion_final_20260927','stress_lp_20260927','stress_mip_corrected_20260927','stress_highs_ipm_20260927'): return self.send(404, dict(error='Unknown report'))
                 file=(ROOT/'results'/rest).resolve()
                 if not file.is_relative_to(ROOT/'results'/parts[0]) or file.suffix not in ('.html','.json','.csv','.stdout','.stderr'): return self.send(404,dict(error='File unavailable'))
             else:
@@ -335,11 +358,11 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(400,dict(error='Invalid solver settings.'))
                 kind=body.get('kind','solve')
                 if kind not in ('solve','arena') or (kind=='arena' and limit>15):return self.send(400,dict(error='Arena supports at most 15 seconds per measured run.'))
-                method=body.get('method','pdhg');branching=body.get('branching','fractional');node_selection=body.get('node_selection','best-bound')
-                if method not in ('auto','simplex','pdhg','rhpdhg','r2hpdhg') or branching not in ('fractional','reliability') or node_selection not in ('best-bound','depth-first','best-estimate'):
+                method=body.get('method','pdhg');branching=body.get('branching','fractional');node_selection=body.get('node_selection','best-bound');primal_heuristic=body.get('primal_heuristic','repair')
+                if method not in ('auto','simplex','dual-simplex','barrier','concurrent','pdhg','rhpdhg','r2hpdhg') or branching not in ('fractional','reliability') or node_selection not in ('best-bound','depth-first','best-estimate') or primal_heuristic not in ('repair','pump','rins','local','all'):
                     return self.send(400,dict(error='Invalid algorithm settings.'))
-                if method=='simplex' and device=='cuda':
-                    return self.send(400,dict(error='Simplex currently runs on CPU.'))
+                if method in ('simplex','dual-simplex') and device=='cuda':
+                    return self.send(400,dict(error='The selected factorization method currently runs on CPU.'))
                 if method in ('rhpdhg','r2hpdhg') and body.get('adaptive',True):
                     return self.send(400,dict(error='Halpern methods require adaptive step sizes to be disabled.'))
                 with LOCK:
@@ -347,7 +370,7 @@ class Handler(BaseHTTPRequestHandler):
                     ident=secrets.token_hex(8)
                     job=dict(id=ident,kind=kind,model=key,name=entry[1] if entry else model.name,state='queued',started_at=time.time(),path=model)
                     JOBS[ident]=job
-                options=dict(method=method,branching=branching,node_selection=node_selection,cuts=bool(body.get('cuts',False)),gpu_monitor=bool(body.get('gpu_monitor',False)),device=device,tol=tol,time_limit=limit,threads=threads,iterations=iterations,adaptive=bool(body.get('adaptive',True)),scaling=bool(body.get('scaling',True)),restart=bool(body.get('restart',True)))
+                options=dict(method=method,branching=branching,node_selection=node_selection,primal_heuristic=primal_heuristic,cuts=bool(body.get('cuts',False)),gpu_monitor=bool(body.get('gpu_monitor',False)),device=device,tol=tol,time_limit=limit,threads=threads,iterations=iterations,adaptive=bool(body.get('adaptive',True)),scaling=bool(body.get('scaling',True)),restart=bool(body.get('restart',True)))
                 job['options']=options; threading.Thread(target=run_arena if kind=='arena' else run_job,args=(job,options),daemon=True).start()
                 return self.send(202,public_job(job))
             if path.startswith('/api/runs/') and path.endswith('/cancel'):

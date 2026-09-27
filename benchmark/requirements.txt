@@ -1,3 +1,6 @@
 # Comparison-only environment. Not a dependency of NIRYUKTI.
 highspy==1.15.1
 numpy==2.5.3
+
+# Optional second external baseline, never a core dependency.
+pyscipopt==6.2.1

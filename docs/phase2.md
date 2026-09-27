@@ -1,4 +1,6 @@
-# Phase 2: progress and remaining development
+# Historical Phase 2 roadmap
+
+This document records the earlier 0.2 planning baseline. Several items below are now implemented. Consult [the current completion record](solver_completion_20260927.md), [large-model evidence](stress_campaign_20260927.md) and the updated architecture/algorithms documents for current status.
 
 The official SIH problem statement is authoritative. The long AI-generated brief supplied with the project is guidance; its complete feature list is not a claim about this prototype.
 

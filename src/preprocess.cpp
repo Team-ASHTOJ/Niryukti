@@ -1,4 +1,5 @@
 #include "internal.hpp"
+#include <map>
 #include <numeric>
 namespace vantage {
 namespace {
@@ -36,8 +37,12 @@ void extra_scale(Prepared &p, std::vector<double> row, std::vector<double> col) 
         if (!representable(m.A.value[k], m.A.value[k] * col[j]))
             col[j] = 1;
     }
+#ifndef VANTAGE_SPARSE_LU
+    // The portable validator recognizes large Q by dominance; avoid breaking that
+    // sufficient certificate. Sparse factorization builds support congruent scaling.
     if (!m.Q.value.empty() && m.c.size() > 256)
         std::fill(col.begin(), col.end(), 1);
+#endif
     bool qsafe = true;
     for (int64_t i = 0; i < m.Q.rows; ++i)
         for (auto k = m.Q.ptr[i]; k < m.Q.ptr[i + 1]; ++k)
@@ -122,7 +127,7 @@ std::vector<double> Prepared::restore_x(const std::vector<double> &x) const {
 std::vector<double> Prepared::restore_y(const std::vector<double> &y, size_t n) const {
     std::vector<double> out(n);
     for (size_t i = 0; i < rows.size(); i++)
-        out[rows[i]] = y[i] * row_scale[i] * objective_scale;
+        out[y[i] >= 0 ? upper_rows[i] : lower_rows[i]] += y[i] * row_scale[i] * objective_scale;
     return out;
 }
 Prepared prepare(const Model &src, const Options &o) {
@@ -179,6 +184,7 @@ Prepared prepare(const Model &src, const Options &o) {
         }
     m.Q = Sparse::build(m.c.size(), m.c.size(), std::move(qe));
     std::vector<Entry> e;
+    std::map<std::vector<std::pair<int64_t, double>>, size_t> duplicate_rows;
     for (size_t i = 0; i < src.rl.size(); i++) {
         long double shift = 0, shift_magnitude = 0;
         int64_t count = 0;
@@ -223,8 +229,47 @@ Prepared prepare(const Model &src, const Options &o) {
                 return p;
             }
         }
+        if (o.presolve && std::isfinite(amin) && std::isfinite(amax)) {
+            long double guard = 8 * std::numeric_limits<long double>::epsilon() *
+                                (src.A.ptr[i + 1] - src.A.ptr[i] + 1) * (1 + magnitude);
+            if (amin - guard >= src.rl[i] && amax + guard <= src.ru[i])
+                continue;
+        }
+        // Exact parallel rows without fixed-variable substitution can be intersected.
+        // Restore each dual sign to the original row that supplied its active endpoint.
+        if (o.presolve && count == src.A.ptr[i + 1] - src.A.ptr[i]) {
+            std::vector<std::pair<int64_t, double>> key;
+            for (auto k = src.A.ptr[i]; k < src.A.ptr[i + 1]; ++k)
+                key.push_back({map[src.A.index[k]], src.A.value[k]});
+            auto found = duplicate_rows.find(key);
+            if (found != duplicate_rows.end()) {
+                auto r = found->second;
+                if (l > m.rl[r]) {
+                    m.rl[r] = l;
+                    p.lower_rows[r] = i;
+                }
+                if (u < m.ru[r]) {
+                    m.ru[r] = u;
+                    p.upper_rows[r] = i;
+                }
+                if (m.rl[r] > m.ru[r]) {
+                    p.failure = "INFEASIBLE";
+                    p.reason = "Disjoint bounds on identical constraint rows";
+                    p.failure_ray.assign(src.rl.size(), 0);
+                    p.failure_ray[p.lower_rows[r]] = -1;
+                    p.failure_ray[p.upper_rows[r]] += 1;
+                    if (!(Verifier(src).infeasibility_bound(p.failure_ray) > 0))
+                        p.failure_ray.clear();
+                    return p;
+                }
+                continue;
+            }
+            duplicate_rows.emplace(std::move(key), p.rows.size());
+        }
         auto row = p.rows.size();
         p.rows.push_back(i);
+        p.lower_rows.push_back(i);
+        p.upper_rows.push_back(i);
         m.rl.push_back(l);
         m.ru.push_back(u);
         m.row_names.push_back(src.row_names[i]);

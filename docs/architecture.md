@@ -1,41 +1,40 @@
-# Architecture
+# Current architecture
+
+NIRYUKTI is the application identity; VANTAGE is the C++ library/binary namespace. The solver core is independent of existing optimization engines. Eigen and CUDA/cuSPARSE provide numerical infrastructure only.
 
 ```mermaid
 flowchart TD
-    Input[MPS / LP / JSON / C++ sparse model] --> Validate[Canonical model validation]
-    Validate --> Classify{Problem class}
-    Classify -->|Continuous| Prepare[Presolve and diagonal scaling]
-    Classify -->|MILP| Tree[Best-bound branch-and-bound]
-    Tree --> Prepare
-    Prepare --> Backend{PDHG backend}
-    Backend --> CPU[CPU CSR / transpose + OpenMP]
-    Backend --> GPU[CUDA resident vectors + cuSPARSE]
-    CPU --> Restore[Original-space reconstruction]
-    GPU --> Restore
-    Restore --> Verify[Independent verifier]
-    Verify --> Tree
-    Verify --> Result[Status + primal/dual + telemetry]
-    Result --> CLI[CLI / Python API / offline reports]
+    Input[MPS / LP / JSON / supported QPLIB] --> Model[Canonical sparse model]
+    Model --> Classify[LP / convex QP / MILP / convex MIQP]
+    Classify --> Continuous[Continuous solver selection]
+    Classify --> Integer[Branch and cut]
+    Integer --> Continuous
+    Continuous --> FOM[CPU / CUDA first-order methods]
+    Continuous --> Simplex[CPU revised primal / dual simplex]
+    Continuous --> Barrier[Experimental predictor-corrector barrier]
+    Continuous --> Portfolio[Verified concurrent portfolio]
+    FOM --> Verify[Independent original-space verification]
+    Simplex --> Verify
+    Barrier --> Verify
+    Portfolio --> Verify
+    Verify --> Integer
+    Verify --> Result[Status / bounds / certificates / telemetry]
+    Result --> Platform[CLI / Python API / local dashboard]
+    Result --> Bench[External baseline comparison and offline reports]
 ```
 
-`include/vantage/vantage.hpp` defines the public sparse model, options, results and API. `src/internal.hpp` defines reversible preparation and a backend interface. The CUDA backend owns device buffers, sparse descriptors and its cuSPARSE handle through RAII. There is no global model or optimization-engine state; a process-level signal flag implements CLI interruption. OpenMP thread configuration is process-level, so concurrent C++ calls with different thread settings are not a supported concurrency contract yet.
+The public model stores `0.5*xᵀQ*x + cᵀx + offset`, interval row/variable bounds and independent variable types. Q includes diagonal shorthand and a symmetric sparse matrix. Original objective sense is restored in output. Sparse dimensions/indices use signed 64-bit host storage; CUDA selects checked 32-bit or 64-bit device index paths. The constraint matrix is never densified by numerical iteration.
 
-The canonical minimization objective is `0.5 sum(q[j]*x[j]^2) + c*x + offset`. `sense` records how to recover an original maximization objective. Bounds are explicit intervals, and integrality is independent of continuous storage. Sparse dimensions and indices are signed 64-bit. The solver never densifies the constraint matrix.
+`src/internal.hpp` defines reversible preparation and the iteration backend interface. Fixed/isolated columns, row mapping, endpoint-provider mapping and scaling factors reconstruct original-space candidates. Exact parallel-row merging preserves which original endpoint supplies a multiplier. A verifier owns a cached transpose and scratch workspace over an immutable original model.
 
-CPU and CUDA implement the same primal/dual update ordering and averaging. The host owns restart decisions and periodically checks original-space solutions. An explicit transpose avoids nondeterministic transpose scatter operations. CUDA device memory is estimated before allocation; CUDA/cuSPARSE calls and kernel launches are checked. GPU execution is currently one relaxation at a time.
+CPU/CUDA first-order backends own accepted/trial vectors, averages, anchors and adaptive state. CUDA's thread-local reusable matrix context retains immutable exact-matched device matrices/descriptors and a stream/handle; iterative buffers remain RAII-managed. Device reductions/graph execution can reduce host overhead, but host time/control/restart decisions and some candidate downloads remain. Directed GPU integer propagation does not perform full model compaction. Batched LP probes share a sparse matrix through SpMM and independently verify final candidates.
 
-Preprocessing has an explicit old/new row and column mapping, fixed values and scaling factors. Variable reconstruction is `x_original = D_c x_scaled`, and dual reconstruction is `y_original = objective_scale * D_r y_scaled`. Eliminated row multipliers are zero. Eliminated fixed/isolated columns remain governed by their original box in verification.
+The experimental barrier owns sparse KKT assembly and optimizer mathematics. CPU uses sparse numerical LU; CUDA uses sparse BiCGSTAB for Newton directions, with CPU KKT assembly and independent residual checks. The verified portfolio has a local cancellation token and joins workers before returning. CLI SIGINT is process-level. Concurrent method/thread allocation remains an experimental contract.
 
-The MILP queue stores bound vectors and warm-start vectors. The sparse matrix is reused, but bound storage is O(variables) per node; a persistent bound-change representation is Phase 2 work. Unresolved leaves remain in global-bound accounting. The iteration objective never substitutes for a lower bound.
+Integer nodes retain sparse bound changes plus optional dense primal/dual/basis warm starts. Bound arrays are materialized for the active node. Warm-start memory can still become significant on large trees. Root/local/global restricted cut pools and binary conflicts have separate validity scopes; neighborhood heuristics cannot contribute unsafe global bounds. Queue, unresolved and closed leaf bounds remain in global-gap accounting.
 
-The benchmark process is outside the solver library and Python product API. It can launch HiGHS in a different process. CMake does not discover, link or download any third-party optimization engine.
+State continuation is explicit: first-order snapshots include actual backend/host iterate state; MIP snapshots include tree/frontier/search state. Atomic local file replacement prevents partial snapshots. Model/backend/configuration matching is mandatory. Checkpoints are trusted local state, not independent proofs.
 
-## Phase 2 ownership and data flow
+The local dashboard isolates CLI and external benchmark processes, bounds requests, supports process-group cancellation and protects mutations with a session token. Benchmark pages read small CSV summaries; large solution vectors are previewed in APIs while complete downloads remain available. Benchmark adapters for HiGHS/default-IPM and SCIP live outside the product solving path. Exact measured source/binary hashes and failed runs are retained.
 
-`Verifier` holds a reference to an immutable original model and owns a cached transpose, activity vector and transpose-product vector. The model must outlive it. It is reused within a continuous solve and is not shared concurrently. Cheap checkpoint evaluation cannot supply a pruning bound; strict final evaluation computes the conservative LP bound.
-
-Each CPU/CUDA iteration backend owns accepted and trial vectors, averaging state and adaptive step state. Rejected trials leave the current point unchanged. CUDA performs block reductions and a device decision before committing a trial; the host receives six control scalars at a chunk boundary. The host handles time limits, candidate selection, restarts and final independent checks. Accepted and rejected step counts are distinct.
-
-An infeasibility ray is stored separately from the best primal candidate. Its original-space margin is recomputed by the verifier when loading a certificate, so saved status text and stored margin are never treated as proof.
-
-The dashboard is a local standard-library Python HTTP service over the CLI, with static browser assets. It uses process isolation, a session token for mutations, loopback host checks, bounded uploads and one active solve. It does not introduce an optimization dependency. Saved benchmark campaigns and live-run histories are separate: browsing old measurements does not pretend to be a fresh solve.
+See [algorithm details](algorithms.md), [current limits and validation](solver_completion_20260927.md), and [stress methodology](stress_campaign_20260927.md).

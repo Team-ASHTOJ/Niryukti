@@ -1,4 +1,7 @@
 #include "internal.hpp"
+#include "json.hpp"
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #ifdef _OPENMP
@@ -14,20 +17,40 @@ volatile std::sig_atomic_t interrupted = 0;
 Result solve(const Model &m, const Options &o) {
     auto overall_start = Clock::now();
     m.validate();
+    if (o.gpu_presolve && (!m.is_mip() || o.device == "cpu" || !cuda_available()))
+        throw std::runtime_error("GPU integer propagation requires CUDA MILP/MIQP");
+    if (o.batch_strong_branching && (o.device == "cpu" || !cuda_available() || m.is_qp() ||
+                                     o.branching != "reliability" || !m.is_mip()))
+        throw std::runtime_error(
+            "Batched strong branching requires CUDA MILP and reliability branching");
+    if (o.checkpoint_nodes < 1)
+        throw std::runtime_error("Checkpoint node interval must be positive");
+    if ((!o.checkpoint_path.empty() || !o.resume_path.empty()) && !m.is_mip() &&
+        o.method != "auto" && o.method != "pdhg" && !anchored_method(o))
+        throw std::runtime_error("Continuous checkpoint/resume requires a first-order method");
     if (!(o.tol > 0 && o.tol < 1) || !std::isfinite(o.tol) || o.iteration_limit < 0 ||
         o.node_limit < 0 || o.time_limit < 0 || std::isnan(o.time_limit) || o.check_every < 1 ||
         o.scaling_passes < 0 || o.scaling_passes > 20 || o.threads < 1 || o.mip_gap < 0 ||
         !std::isfinite(o.mip_gap) || !std::isfinite(o.integer_tol) || o.integer_tol <= 0 ||
         o.integer_tol >= .5 || o.power_iterations < 0 || o.power_iterations > 1000)
         throw std::runtime_error("Invalid solver options");
-    if (o.device != "auto" && o.device != "cpu" && o.device != "cuda")
+    if (o.device != "auto" && o.device != "cpu" && o.device != "cuda" && o.device != "hip")
         throw std::runtime_error("Unknown device");
-    if (o.method != "pdhg" && o.method != "simplex" && o.method != "auto" && !anchored_method(o))
+    if (gpu_request(o) && o.device != gpu_backend_name()) {
+        Result r;
+        r.status = "UNSUPPORTED";
+        r.message = "Requested GPU backend not compiled: " + o.device;
+        return r;
+    }
+    if (o.method != "pdhg" && o.method != "simplex" && o.method != "auto" &&
+        o.method != "barrier" && o.method != "concurrent" && o.method != "dual-simplex" &&
+        !anchored_method(o))
         throw std::runtime_error("Unknown method: use pdhg, halpern, rhpdhg or r2hpdhg");
     if (o.primal_weight != "displacement" && o.primal_weight != "pid")
         throw std::runtime_error("Unknown primal weight controller");
     if (o.primal_heuristic != "repair" && o.primal_heuristic != "pump" &&
-        o.primal_heuristic != "rins" && o.primal_heuristic != "all")
+        o.primal_heuristic != "rins" && o.primal_heuristic != "local" &&
+        o.primal_heuristic != "all")
         throw std::runtime_error("Unknown primal heuristic");
     if (o.polishing && m.is_qp())
         throw std::runtime_error("Feasibility polishing currently requires LP relaxations");
@@ -67,7 +90,7 @@ Result solve(const Model &m, const Options &o) {
         r.message = "Nonconvex quadratic objective";
         return r;
     }
-    if (o.device == "cuda" && !cuda_available()) {
+    if (gpu_request(o) && !cuda_available()) {
         Result r;
         r.status = "UNSUPPORTED";
         r.message = cuda_description();
@@ -80,10 +103,47 @@ Result solve(const Model &m, const Options &o) {
 Result solve_continuous(const Model &original, const Options &o) {
     if (anchored_method(o) && (o.adaptive || original.is_qp() || original.is_mip()))
         throw std::runtime_error("Experimental Halpern supports continuous LP with --no-adaptive");
-    if (o.method == "simplex" || (o.method == "auto" && o.device != "cuda" && !original.is_qp() &&
-                                  original.A.rows <= simplex_row_limit())) {
+    if (o.method == "auto" && !original.is_mip() &&
+        (!o.checkpoint_path.empty() || !o.resume_path.empty())) {
+        auto first_order = o;
+        first_order.method = "pdhg";
+        return solve_continuous(original, first_order);
+    }
+    if (o.method == "concurrent")
+        return solve_portfolio(original, o);
+    if (o.method == "barrier")
+        return solve_barrier(original, o);
+    auto selection_start = Clock::now();
+    if (o.method == "simplex" || o.method == "dual-simplex" ||
+        (o.method == "auto" && !gpu_request(o) && !original.is_qp() &&
+         original.A.rows <= simplex_row_limit())) {
         auto simplex = solve_simplex(original, o);
-        if (o.method == "simplex" || simplex.status != "UNSUPPORTED")
+        if (o.method == "simplex" || o.method == "dual-simplex" ||
+            (simplex.status != "UNSUPPORTED" && simplex.status != "NUMERICAL_ERROR" &&
+             simplex.status != "UNKNOWN"))
+            return simplex;
+        if (simplex.status != "UNSUPPORTED" && !stop_requested(o) &&
+            elapsed(selection_start) < o.time_limit) {
+            Options recovery = o;
+            recovery.method = "pdhg";
+            recovery.time_limit = std::max(0., o.time_limit - elapsed(selection_start));
+            if (simplex.x.size() == original.c.size() && simplex.y.size() == original.rl.size() &&
+                simplex.accuracy.finite) {
+                recovery.initial_x = simplex.x;
+                recovery.initial_y = simplex.y;
+            }
+            auto result = solve_continuous(original, recovery);
+            result.preprocess_seconds += simplex.preprocess_seconds;
+            result.iteration_seconds += simplex.iteration_seconds;
+            result.verification_seconds += simplex.verification_seconds;
+            result.iterations += simplex.iterations;
+            result.seconds = elapsed(selection_start);
+            result.device_reason =
+                "Auto recovery from simplex " + simplex.status + "; " + result.device_reason;
+            result.message = "Simplex recovery: " + simplex.message + "; " + result.message;
+            return result;
+        }
+        if (simplex.status != "UNSUPPORTED")
             return simplex;
     }
     auto start = Clock::now();
@@ -100,6 +160,9 @@ Result solve_continuous(const Model &original, const Options &o) {
     if (!prep.failure.empty()) {
         r.status = prep.failure;
         r.message = prep.reason;
+        r.infeasibility_ray = prep.failure_ray;
+        if (!r.infeasibility_ray.empty())
+            r.certificate_margin = Verifier(original).infeasibility_bound(r.infeasibility_ray);
         r.seconds = elapsed(start);
         return r;
     }
@@ -182,10 +245,10 @@ Result solve_continuous(const Model &original, const Options &o) {
         if (c2 > 1e-24 && b2 > 1e-24)
             weight = std::clamp(std::sqrt(double(c2 / b2)), 1e-4, 1e4);
     }
-    bool usecuda = o.device == "cuda" || (o.device == "auto" && cuda_available() &&
-                                          (m.A.value.size() + m.Q.value.size() >= 100000 ||
-                                           o.cuda_graphs || o.matrix_precision == "mixed"));
-    r.backend = usecuda ? "cuda" : "cpu";
+    bool usecuda = gpu_request(o) || (o.device == "auto" && cuda_available() &&
+                                      (m.A.value.size() + m.Q.value.size() >= 100000 ||
+                                       o.cuda_graphs || o.matrix_precision == "mixed"));
+    r.backend = usecuda ? gpu_backend_name() : "cpu";
     r.device_name = usecuda ? cuda_description() : "CPU";
     auto transfer = Clock::now();
     bool residual_restarts = o.method == "rhpdhg" || o.method == "r2hpdhg";
@@ -229,8 +292,138 @@ Result solve_continuous(const Model &original, const Options &o) {
     std::vector<double> epochx = x, epochy = y;
     PrimalWeightController controller;
     int64_t next_polish = 100, previous_rejected = 0, next_host_check = 0;
+    using Json = nlohmann::json;
+    auto pack = [](const std::vector<double> &values) {
+        Json array = Json::array();
+        for (double v : values) {
+            if (std::isnan(v))
+                throw std::runtime_error("NaN checkpoint state");
+            if (std::isfinite(v))
+                array.push_back(v);
+            else
+                array.push_back(v > 0 ? "inf" : "-inf");
+        }
+        return array;
+    };
+    auto unpack = [](const Json &array) {
+        std::vector<double> values;
+        for (const auto &v : array) {
+            double q;
+            if (v.is_number())
+                q = v.get<double>();
+            else if (v == "inf")
+                q = inf;
+            else if (v == "-inf")
+                q = -inf;
+            else
+                throw std::runtime_error("Invalid checkpoint number");
+            if (std::isnan(q))
+                throw std::runtime_error("NaN checkpoint value");
+            values.push_back(q);
+        }
+        return values;
+    };
+    Json configuration = {{"backend", r.backend},
+                          {"method", o.method},
+                          {"tol", o.tol},
+                          {"presolve", o.presolve},
+                          {"scaling", o.scaling},
+                          {"scaling_passes", o.scaling_passes},
+                          {"adaptive", o.adaptive},
+                          {"restart", o.restart},
+                          {"primal_weight", o.primal_weight},
+                          {"power_iterations", o.power_iterations},
+                          {"polishing", o.polishing},
+                          {"check_every", o.check_every},
+                          {"graphs", o.cuda_graphs},
+                          {"precision", o.matrix_precision},
+                          {"indices", o.gpu_indices},
+                          {"monitor", o.gpu_monitor}};
+    if (!o.resume_path.empty()) {
+        std::ifstream file(o.resume_path);
+        if (!file)
+            throw std::runtime_error("Cannot open continuous checkpoint");
+        Json saved;
+        file >> saved;
+        if (saved.at("schema") != "vantage-continuous-1" ||
+            saved.at("fingerprint") != original.fingerprint() ||
+            saved.at("configuration") != configuration)
+            throw std::runtime_error("Continuous checkpoint model/configuration mismatch");
+        std::vector<std::vector<double>> state;
+        for (const auto &v : saved.at("backend_state"))
+            state.push_back(unpack(v));
+        backend->restore(state);
+        r.x = unpack(saved.at("best_x"));
+        r.y = unpack(saved.at("best_y"));
+        if (r.x.size() != original.c.size() || r.y.size() != original.rl.size())
+            throw std::runtime_error("Continuous checkpoint solution dimensions");
+        r.accuracy = verifier.evaluate(r.x, r.y);
+        if (!r.accuracy.finite)
+            throw std::runtime_error("Invalid continuous checkpoint candidate");
+        auto control = unpack(saved.at("control"));
+        if (control.size() != 8)
+            throw std::runtime_error("Continuous checkpoint controller dimensions");
+        step = control[0];
+        weight = control[1];
+        restart_kkt = control[2];
+        since_restart = int64_t(control[3]);
+        next_polish = int64_t(control[4]);
+        previous_rejected = int64_t(control[5]);
+        next_host_check = int64_t(control[6]);
+        r.iterations = saved.at("iterations");
+        r.restarts = saved.at("restarts");
+        r.rejected_steps = saved.at("rejected_steps");
+        r.weight_updates = saved.at("weight_updates");
+        if (!(step > 0) || !(weight > 0) || !std::isfinite(step) || !std::isfinite(weight) ||
+            r.iterations < 0 || since_restart < 0)
+            throw std::runtime_error("Invalid continuous checkpoint controller");
+        epochx = unpack(saved.at("epoch_x"));
+        epochy = unpack(saved.at("epoch_y"));
+        if (epochx.size() != x.size() || epochy.size() != y.size())
+            throw std::runtime_error("Continuous checkpoint epoch dimensions");
+        controller.restore(unpack(saved.at("pid")));
+    }
+    auto save_checkpoint = [&]() {
+        if (o.checkpoint_path.empty())
+            return;
+        Json state = Json::array();
+        for (const auto &v : backend->snapshot())
+            state.push_back(pack(v));
+        Json saved = {
+            {"schema", "vantage-continuous-1"},
+            {"fingerprint", original.fingerprint()},
+            {"configuration", configuration},
+            {"backend_state", state},
+            {"best_x", pack(r.x)},
+            {"best_y", pack(r.y)},
+            {"epoch_x", pack(epochx)},
+            {"epoch_y", pack(epochy)},
+            {"pid", pack(controller.state())},
+            {"control", pack({step, weight, restart_kkt, double(since_restart), double(next_polish),
+                              double(previous_rejected), double(next_host_check), 0})},
+            {"iterations", r.iterations},
+            {"restarts", r.restarts},
+            {"rejected_steps", r.rejected_steps},
+            {"weight_updates", r.weight_updates}};
+        auto temporary = o.checkpoint_path + ".tmp";
+        {
+            std::ofstream file(temporary);
+            if (!file)
+                throw std::runtime_error("Cannot write continuous checkpoint");
+            file << saved.dump();
+            file.flush();
+            if (!file)
+                throw std::runtime_error("Continuous checkpoint write failed");
+        }
+        std::filesystem::rename(temporary, o.checkpoint_path);
+    };
+    int64_t next_checkpoint = r.iterations;
     while (r.iterations < o.iteration_limit) {
-        if (interrupted) {
+        if (r.iterations >= next_checkpoint) {
+            save_checkpoint();
+            next_checkpoint = r.iterations + o.checkpoint_nodes;
+        }
+        if (stop_requested(o)) {
             r.status = "INTERRUPTED";
             break;
         }
@@ -350,7 +543,8 @@ Result solve_continuous(const Model &original, const Options &o) {
                               ? 2 * r.iterations
                               : std::numeric_limits<int64_t>::max();
             int64_t budget = std::min(r.iterations / 8, (o.iteration_limit - r.iterations) / 2);
-            if (ca.gap <= .01 && budget > 0 && !interrupted && elapsed(start) < o.time_limit) {
+            if (ca.gap <= .01 && budget > 0 && !stop_requested(o) &&
+                elapsed(start) < o.time_limit) {
                 r.polishing_attempts++;
                 Model primal = original;
                 std::fill(primal.c.begin(), primal.c.end(), 0);
@@ -359,6 +553,8 @@ Result solve_continuous(const Model &original, const Options &o) {
                 po.method = "pdhg";
                 po.adaptive = true;
                 po.polishing = false;
+                po.checkpoint_path.clear();
+                po.resume_path.clear();
                 po.initial_x = ox;
                 po.initial_y.assign(original.rl.size(), 0);
                 po.iteration_limit = budget;
@@ -376,7 +572,7 @@ Result solve_continuous(const Model &original, const Options &o) {
                 };
                 auto pr = solve_continuous(primal, po);
                 accumulate(pr);
-                if (pr.accuracy.finite && pr.accuracy.primal <= o.tol && !interrupted &&
+                if (pr.accuracy.finite && pr.accuracy.primal <= o.tol && !stop_requested(o) &&
                     elapsed(start) < o.time_limit) {
                     auto dual = dual_feasibility_model(original);
                     po.initial_x = oy;
@@ -439,6 +635,7 @@ Result solve_continuous(const Model &original, const Options &o) {
     r.verification_seconds += elapsed(check);
     if (r.status == "OPTIMAL" && (!r.accuracy.finite || r.accuracy.kkt > o.tol))
         r.status = "NUMERICAL_ERROR";
+    save_checkpoint();
     r.seconds = elapsed(start);
     return r;
 }

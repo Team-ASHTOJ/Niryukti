@@ -136,6 +136,15 @@ int main() {
         }
         auto marker = read_model((temp / "marker.mps").string());
         require(marker.ub[0] == 1, "MPS INTORG default upper bound");
+        {
+            const auto path = std::filesystem::temp_directory_path() / "vantage_wide_bound.mps";
+            std::ofstream f(path);
+            f << "NAME WIDE_BOUND\nROWS\n N OBJ\n L R1\nCOLUMNS\n X1 OBJ 1 R1 1\nRHS\n RHS R1 1\nBOUNDS\n UP bnd       X1                              1\nENDATA\n";
+            f.close();
+            const auto wide = read_model(path.string());
+            require(wide.ub[0] == 1, "MPS wide free-format bound value is not truncated");
+            std::filesystem::remove(path);
+        }
         optimum(marker, -1);
         {
             std::ofstream f(temp / "marker_bound.mps");

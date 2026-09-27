@@ -1,0 +1,22 @@
+[
+  {
+    "instance": "rail03",
+    "suite": "miplib",
+    "source": "https://miplib.zib.de/WebData/instances/rail03.mps.gz",
+    "source_revision": null,
+    "path": "datasets/stress_public/miplib/rail03.mps",
+    "sha256": "ecc8dbdbbbbe38f6a9d8189cd6861b83e92058bdfebf70c85254d9cd992e3060",
+    "bytes": 126660350,
+    "status": "CACHED"
+  },
+  {
+    "instance": "ns1644855",
+    "suite": "miplib",
+    "source": "https://miplib.zib.de/WebData/instances/ns1644855.mps.gz",
+    "source_revision": null,
+    "path": "datasets/stress_public/miplib/ns1644855.mps",
+    "sha256": "35c2a4bd4fdc12aac303e7c564a7c9531cbf6ab0527d8f37576f994640d616e5",
+    "bytes": 59517904,
+    "status": "CACHED"
+  }
+]

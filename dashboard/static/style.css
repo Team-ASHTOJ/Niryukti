@@ -639,3 +639,10 @@ td small{display:block;color:var(--muted);font:400 12px var(--font);margin-top:3
  .application-panel{padding:20px}
  td,th{padding-left:16px;padding-right:16px}
 }
+
+/* Scope cards reuse the existing palette and typography. */
+.capability-card { padding: 20px 0; border-top: 1px solid var(--border, #d8d8d0); }
+.capability-card h3 { margin: 0 0 12px; }
+.capability-card p { line-height: 1.65; margin: 12px 0 0; }
+.dot-scip, .dot-highs-ipm { background: var(--clay, #a86d53); }
+.bar-value small { display: block; margin-top: 3px; font-size: 9px; opacity: .75; }

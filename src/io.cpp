@@ -471,7 +471,7 @@ Model read_mps(std::istream &in) {
             } else if (section == "BOUNDS") {
                 // Fixed-format files may omit the bound-set field, including
                 // the very first record. Preserve its column field explicitly.
-                if (line.size() >= 22 && trim(line.substr(3, 1)).empty() &&
+                if (t.size() < 4 && line.size() >= 22 && trim(line.substr(3, 1)).empty() &&
                     trim(line.substr(12, 2)).empty() && trim(line.substr(22, 2)).empty()) {
                     auto set = trim(line.substr(4, 8));
                     auto name = trim(line.substr(14, 8));
@@ -946,6 +946,8 @@ std::string result_json(const Model &m, const Result &r) {
         {"presolve", {{"removed_rows", r.removed_rows}, {"removed_columns", r.removed_columns}}},
         {"primal", r.x},
         {"dual", r.y}};
+    if (!r.basis.empty())
+        j["basis"] = {{"indices", r.basis}, {"fingerprint", r.basis_fingerprint}};
     j["selection"] = {{"method", r.method_selected},
                       {"device", r.backend},
                       {"reason", r.device_reason},
@@ -965,6 +967,11 @@ std::string result_json(const Model &m, const Result &r) {
             {"nodes", r.nodes},
             {"strong_branch_probes", r.strong_branch_probes},
             {"cuts_added", r.cuts_added},
+            {"cut_rounds", r.cut_rounds},
+            {"local_cuts_added", r.local_cuts_added},
+            {"conflicts_learned", r.conflicts_learned},
+            {"conflicts_pruned", r.conflicts_pruned},
+            {"local_branching_calls", r.local_branching_calls},
             {"pump_rounds", r.pump_rounds},
             {"rins_calls", r.rins_calls},
             {"heuristic_nodes", r.heuristic_nodes},
@@ -996,6 +1003,10 @@ Result read_solution(const Model &m, const std::string &path, bool allow_model_c
     r.x = j.at("primal").get<std::vector<double>>();
     r.y = j.at("dual").get<std::vector<double>>();
     r.status = j.at("status");
+    if (j.contains("basis")) {
+        r.basis = j.at("basis").at("indices").get<std::vector<int64_t>>();
+        r.basis_fingerprint = j.at("basis").at("fingerprint");
+    }
     if (j.contains("objective") && j["objective"].is_number())
         r.accuracy.objective = m.sense * j["objective"].get<double>();
     else if (j.contains("objective") && r.status == "OPTIMAL")

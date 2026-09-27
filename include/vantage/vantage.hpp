@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <csignal>
 #include <cstdint>
@@ -43,13 +44,19 @@ struct Options {
     int check_every = 100, scaling_passes = 5, threads = 1;
     bool presolve = true, restart = true, adaptive = true, verbose = false;
     std::vector<double> initial_x, initial_y;
+    std::vector<int64_t> initial_basis;
+    std::string basis_fingerprint;
+    std::shared_ptr<std::atomic<bool>> cancellation;
+    std::string checkpoint_path, resume_path;
+    int64_t checkpoint_nodes = 100;
     // Experimental, opt-in features; existing PDHG/Ruiz defaults are retained.
     std::string method = "pdhg", scaling = "ruiz", branching = "fractional";
     std::string primal_weight = "displacement";
     int power_iterations = 0;
     bool polishing = false;
     bool cuts = false;
-    bool cuda_graphs = false, gpu_monitor = false;
+    bool cuda_graphs = false, gpu_monitor = false, batch_strong_branching = false,
+         gpu_presolve = false;
     std::string gpu_indices = "auto", matrix_precision = "fp64";
     std::string primal_heuristic = "repair", node_selection = "best-bound";
 };
@@ -74,6 +81,8 @@ class Verifier {
 struct Result {
     std::string status = "UNKNOWN", message, backend = "cpu", device_name = "CPU";
     std::vector<double> x, y, infeasibility_ray;
+    std::vector<int64_t> basis;
+    std::string basis_fingerprint;
     double certificate_margin = 0;
     Accuracy accuracy;
     double seconds = 0, preprocess_seconds = 0, transfer_seconds = 0, iteration_seconds = 0,
@@ -84,7 +93,8 @@ struct Result {
     int64_t strong_branch_probes = 0;
     int64_t weight_updates = 0, polishing_iterations = 0, polishing_attempts = 0;
     double operator_norm_estimate = 0;
-    int64_t cuts_added = 0;
+    int64_t cuts_added = 0, cut_rounds = 0, local_cuts_added = 0;
+    int64_t conflicts_learned = 0, conflicts_pruned = 0, local_branching_calls = 0;
     int64_t monitor_checks = 0, host_candidate_checks = 0, skipped_candidate_checks = 0;
     int gpu_index_bits = 0;
     bool graph_execution = false;
@@ -103,6 +113,13 @@ Result solve(const Model &, const Options & = {});
 Result solve_continuous(const Model &, const Options &);
 Result solve_mip(const Model &, const Options &);
 extern volatile std::sig_atomic_t interrupted;
+inline const char *gpu_backend_name() {
+#ifdef VANTAGE_HAS_HIP
+    return "hip";
+#else
+    return "cuda";
+#endif
+}
 bool cuda_available();
 std::string cuda_description();
 } // namespace vantage

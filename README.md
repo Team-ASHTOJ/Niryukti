@@ -12,7 +12,7 @@ An independent sparse optimization engine for SIH26119, built in C++20 with an o
 ./scripts/run_dashboard.sh
 ```
 
-Open **http://127.0.0.1:8080** for the local dashboard: solver overview, searchable benchmark comparisons, accuracy details, model library, live CPU/GPU solves, model import and downloadable results. The interface uses real saved measurements and the actual solver executable. See [dashboard documentation](dashboard/README.md).
+Open **http://127.0.0.1:8080** for the local dashboard: solver overview, capability/pending-work cards, large-model and public-baseline comparisons, accuracy details, model library, live CPU/GPU solves, model import and downloadable results. The interface uses real saved measurements and the actual solver executable. See [dashboard documentation](dashboard/README.md).
 
 ## Run it
 
@@ -37,16 +37,16 @@ cmake --build build-cpu --parallel 4
 
 Requirements: CMake ≥3.24, a C++20 compiler, Python ≥3.10 for scripts. CUDA builds require the CUDA toolkit and a compatible host compiler. The build script selects GCC 15 when available; override CMake settings for other installations. GPU runtime tests run only when a usable CUDA device is present. Default arithmetic is FP64; unsafe fast-math is not enabled.
 
-## What works in 0.2
+## Current prototype capabilities
 
 | Component | Implemented behavior |
 |---|---|
 | Independent solver core | Own PDHG updates, preprocessing, scaling, verification, and branch-and-bound |
 | Sparse matrices | COO construction with duplicate aggregation; CSR and explicit sparse transpose; 64-bit offsets and indices |
-| CPU and CUDA | Same algorithm; OpenMP CPU loops; Eigen sparse numerical basis LU; cuSPARSE GPU SpMV and fused update/averaging kernels |
-| LP | Adaptive restarted PDHG; opt-in Halpern/reflected methods; compact CPU revised primal simplex (4096 transformed-row guard; 512 with the optional dense kernel) |
+| CPU and CUDA | Shared first-order formulation; OpenMP CPU loops; Eigen numerical sparse factorization; cuSPARSE SpMV/SpMM, reusable matrix contexts, graph execution and device diagnostics |
+| LP | Adaptive/restarted PDHG, opt-in Halpern/reflected methods; compact revised primal/dual simplex with recovery and basis reoptimization; experimental predictor-corrector barrier and verified concurrent portfolio |
 | Convex QP / MIQP | Diagonal proximal updates; symmetric sparse convex Q via smooth splitting; QP relaxations and conservative minorant bounds for MIQP |
-| MILP | Bound-delta nodes, selectable search policies, opt-in reliability branching, root MIR/cover/clique cuts, pump/RINS; conservative bounds and incumbent gap |
+| MILP / MIQP | Bound-delta nodes, search policies, reliability branching, restricted root/node/global cut pools, binary no-good conflicts, pump/RINS/local branching; verified incumbents and conservative bounds |
 | Preprocessing | Fixed-variable and bounded isolated-column elimination, empty rows, row-activity infeasibility checks, reversible reconstruction |
 | Scaling | Iterative diagonal equilibration with original-space verification |
 | Input | MPS linear/integer sections and ranges; symmetric/triangular `QMATRIX`/`QUADOBJ`; documented LP text subset; sparse JSON; supported continuous QPLIB |
@@ -54,7 +54,8 @@ Requirements: CMake ≥3.24, a C++20 compiler, Python ≥3.10 for scripts. CUDA 
 | Infeasibility certificates | Independently verified box/row Farkas rays, saved as JSON and replayable through `verify` |
 | API and CLI | C++ library, Python subprocess API, solve/inspect/explain/verify/convert/devices commands |
 | Demonstration | Synthetic refinery blending LP, refinery scheduling MILP, supply-chain MILP, production planning LP, coupled power-dispatch QP and integer-dispatch MIQP |
-| Benchmarks | External HiGHS adapter, CPU/CUDA comparisons, raw runs including failures, checksums, offline HTML and CSV |
+| Benchmarks | External HiGHS/default-IPM and SCIP adapters, CPU/CUDA comparisons, public railway/Netlib and million-variable synthetic screening, retained failures, checksums, offline HTML/CSV and performance profiles |
+| State continuation | Atomic MIP tree snapshots and CPU/CUDA first-order iterate/controller snapshots; compatible-model/backend/configuration checks |
 
 ## CLI examples
 
@@ -116,13 +117,15 @@ Read [`docs/benchmark_methodology.md`](docs/benchmark_methodology.md) before int
 
 Opt-in research features include combined scaling, CPU Halpern/restarted/reflected Halpern LP methods, PID weighting, power estimates, LP feasibility polishing, reliability branching, binary cover/clique cuts, and feasibility-pump/RINS heuristics. The default remains PDHG with Ruiz scaling and most-fractional branching. See [research integration and validation](docs/research_features.md) for examples, supported combinations, source references and remaining work.
 
-The [Phase 2 measured comparison](docs/phase2_results.md) records 8/9 selected cases solved by both NIRYUKTI backends versus 9/9 by HiGHS, including the remaining e226 limit and ADLITTLE GPU regression. A separate 200,000-iteration experiment solves e226 on CPU/CUDA in all three repetitions; it does not replace the standard-budget result. The [Phase 1 snapshot](docs/validation.md) remains available as historical evidence.
+The historical [Phase 2 measured comparison](docs/phase2_results.md) records 8/9 selected cases solved by both NIRYUKTI backends versus 9/9 by HiGHS, including the remaining e226 limit and ADLITTLE GPU regression. A separate 200,000-iteration experiment solves e226 on CPU/CUDA in all three repetitions; it does not replace the standard-budget result. The [Phase 1 snapshot](docs/validation.md) remains available as historical evidence.
 
 ## Limits and next phase
 
-General/off-diagonal Q, MIQP, nonlinear models, general recession rays and comprehensive infeasibility detection, simplex/IPM, general continuous presolve propagation, cuts, pseudo-cost branching, persistent GPU contexts, and checkpoints are not implemented. MILP may return a feasible incumbent with an unresolved gap. Time limits are checked between iteration chunks; preprocessing, verification, and a chunk may overrun the requested limit.
+Supported sparse QP and convex MIQP, revised dual simplex, an experimental barrier, restricted cut/conflict pools, reusable CUDA matrix contexts and actual first-order/tree checkpoints are implemented. This does not imply mature industrial robustness. Uncertain large PSD recognition, unrestricted global cut/conflict analysis, full GPU presolve compaction and fully device-resident control remain pending. Barrier/simplex/concurrent full-state checkpointing is unsupported; nonlinear and general nonconvex optimization remain out of scope. AMD/HIP is deferred.
 
-GPU arrays remain resident between checks; full current and averaged iterates are copied to CPU for periodic independent verification. This is correct and testable but expensive. Verification now reuses its transpose and workspace. GPU-side full residual monitoring and persistent GPU contexts remain next steps. No GPU speed advantage over HiGHS is assumed.
+MILP may return no incumbent or a feasible incumbent with an unresolved gap. Time checks occur at control boundaries; parsing, presolve, numerical kernels and final verification can overrun the budget. The public railway stress campaign explicitly retains these limits and process watchdog timeouts.
+
+Device monitoring reduces routine vector downloads when enabled. Final original-space verification remains independent; host control and periodic candidate reconstruction still exist. GPU iteration speed does not imply end-to-end speedup when parsing/setup dominates. See [current implementation boundaries](docs/solver_completion_20260927.md) and [large-model protocol and evidence](docs/stress_campaign_20260927.md).
 
 See [architecture](docs/architecture.md), [mathematics](docs/algorithms.md), [formats](docs/supported_formats.md), [Phase 2 work](docs/phase2.md), and [dependency policy](docs/dependency_policy.md).
 
@@ -152,4 +155,6 @@ docker build -f Dockerfile.cuda -t vantage:cuda .
 docker run --gpus all --rm vantage:cuda devices
 ```
 
-Dockerfiles provide reproducible build recipes; image validation and actual measured campaigns are recorded separately. `auto` selects compact CPU simplex where supported; otherwise it retains PDHG. Root cuts and new CUDA monitoring remain opt-in. Full tree checkpoint/resume, barrier/IPM, dual simplex, GPU-batched branching, conflict learning and HIP are not implemented.
+Dockerfiles provide reproducible build recipes; image validation and actual measured campaigns are recorded separately. `auto` selects compact CPU simplex where supported; otherwise it retains PDHG. Root cuts and new CUDA monitoring remain opt-in. First-order/tree checkpoints, experimental barrier/dual simplex, batched branching probes and restricted binary conflicts are now implemented and tested. Their limitations and hardware-validation boundaries are documented in the completion record; AMD remains deferred.
+
+Current completion-round implementation, usage, trust boundaries and hardware validation: [solver completion record](docs/solver_completion_20260927.md).

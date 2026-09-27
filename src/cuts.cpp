@@ -1,7 +1,10 @@
 #include "internal.hpp"
 #include <set>
+#include <stdexcept>
 namespace vantage {
-int add_mir_cuts(Model &m, int limit) {
+int add_mir_cuts(Model &m, int limit, const std::vector<double> *point) {
+    if (point && point->size() != m.c.size())
+        throw std::runtime_error("MIR separation point dimension mismatch");
     if (limit <= 0)
         return 0;
     auto original_rows = m.A.rows;
@@ -10,6 +13,18 @@ int add_mir_cuts(Model &m, int limit) {
         for (auto k = m.A.ptr[i]; k < m.A.ptr[i + 1]; ++k)
             all.push_back({i, m.A.index[k], m.A.value[k]});
     std::set<std::vector<double>> fingerprints;
+    // Seed exact row fingerprints: repeated separation must not append the same cut.
+    for (int64_t i = 0; i < original_rows; ++i) {
+        if (!std::isfinite(m.rl[i]))
+            continue;
+        std::vector<double> key;
+        for (auto k = m.A.ptr[i]; k < m.A.ptr[i + 1]; ++k) {
+            key.push_back(double(m.A.index[k]));
+            key.push_back(m.A.value[k]);
+        }
+        key.push_back(m.rl[i]);
+        fingerprints.insert(std::move(key));
+    }
     int added = 0;
     for (int64_t row = 0; row < original_rows && added < limit; ++row)
         for (int side : {1, -1}) {
@@ -71,6 +86,19 @@ int add_mir_cuts(Model &m, int limit) {
             if (!valid || cut.empty() || !std::isfinite(bound))
                 continue;
             double lower = std::nextafter(double(bound), -inf);
+            if (point) {
+                long double activity = 0, magnitude = std::abs((long double)lower);
+                bool finite = true;
+                for (auto [j, alpha] : cut) {
+                    finite &= std::isfinite((*point)[j]);
+                    long double term = (long double)alpha * (*point)[j];
+                    activity += term;
+                    magnitude += std::abs(term);
+                }
+                if (!finite || !std::isfinite(activity) ||
+                    (long double)lower - activity <= 1e-7L * (1 + magnitude))
+                    continue;
+            }
             key.push_back(lower);
             if (!fingerprints.insert(key).second)
                 continue;

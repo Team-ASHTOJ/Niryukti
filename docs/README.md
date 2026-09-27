@@ -4,8 +4,10 @@ Start here when preparing explanations, slides, submissions, or further research
 
 | Document | Purpose |
 | --- | --- |
+| [Latest solver completion](solver_completion_20260927.md) | New engines, actual checkpoints, GPU/MIP changes, validation and limitations |
 | [Submission round](submission_round_20260927.md) | Current integration, algorithms, scope and pending work |
 | [Operations guide](operations.md) | Build, run, validate, demonstrate and maintain the documentation |
+| [Large-model stress campaign](stress_campaign_20260927.md) | Public railway/Netlib and million-variable synthetic screening, protocol and retained limits |
 | [Development log](development_log.md) | Dated changes, decisions, experiments, evidence and unresolved work |
 | [Architecture](architecture.md) | Module boundaries, ownership and execution flow |
 | [Algorithms](algorithms.md) | Mathematical formulation, iteration rules and verification |

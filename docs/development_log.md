@@ -92,3 +92,11 @@ Added and tested CUDA Halpern variants, graph execution, 32/64-bit CSR selection
 ## 2026-09-27 — main integration and submission engineering
 
 Frontend fast-forward merged and pushed to main; default branch updated. Sparse QP transformations, conservative MIQP bounds, compact revised primal simplex, MIR cuts, node storage/policies, CUDA diagnostic gating and certificate checks are being implemented and validated. See [the detailed record](submission_round_20260927.md); benchmark claims will be added only after measured campaigns.
+
+## 2026-09-27 — state continuation, numerical recovery and large-model evaluation
+
+Implemented actual CPU/CUDA first-order iterate checkpoints and full MIP frontier snapshots; sparse singular PSD recognition; revised dual-simplex reoptimization; independent predictor-corrector barrier with optional GPU sparse Newton solves; verified concurrent continuous portfolio; reusable CUDA matrix contexts, batched branching and directed-rounding integer propagation; restricted global/local MIR cut pools, conservative binary conflicts and local branching. All support boundaries and validation evidence are recorded in [the completion record](solver_completion_20260927.md).
+
+The scheduling regression exposed tiny forbidden-sign simplex row multipliers that prevented a finite safe bound. Projecting multipliers onto the exact interval dual domain, followed by independent re-verification, restored the proof path. Continuous node bounds now also receive conservative propagation. CPU/CUDA research tests include this regression, checkpoint continuation, GPU numerical Newton solves, large singular PSD acceptance/rejection and enumerated MILPs.
+
+Added an isolated SCIP baseline and an explicit large-model screening campaign: public railway/MIPLIB instances, Netlib convergence tests and a streamed million-variable planted LP. [The stress protocol](stress_campaign_20260927.md) distinguishes public models, derived LP relaxations and synthetic data. AMD remains deferred. Full GPU control/compaction, unrestricted conflict analysis, all-method checkpointing and physical second-laptop/container-GPU validation remain incomplete; no claim of commercial-grade completeness is made.

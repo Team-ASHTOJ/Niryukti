@@ -1,0 +1,362 @@
+[
+  {
+    "instance": "afiro.mps",
+    "solver": "cpu",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.0012352560000000001
+  },
+  {
+    "instance": "afiro.mps",
+    "solver": "cuda",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.30434902
+  },
+  {
+    "instance": "afiro.mps",
+    "solver": "highs",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.0035355330001038965
+  },
+  {
+    "instance": "adlittle.mps",
+    "solver": "cpu",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.006802028
+  },
+  {
+    "instance": "adlittle.mps",
+    "solver": "cuda",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 2.6835367519999997
+  },
+  {
+    "instance": "adlittle.mps",
+    "solver": "highs",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.007354002998908982
+  },
+  {
+    "instance": "e226.mps",
+    "solver": "cpu",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 3.5256596659999997
+  },
+  {
+    "instance": "e226.mps",
+    "solver": "cuda",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 9.371297926
+  },
+  {
+    "instance": "e226.mps",
+    "solver": "highs",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.03453477400034899
+  },
+  {
+    "instance": "israel.mps",
+    "solver": "cpu",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.031137828
+  },
+  {
+    "instance": "israel.mps",
+    "solver": "cuda",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 3.7143289910000004
+  },
+  {
+    "instance": "israel.mps",
+    "solver": "highs",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.018167774000175996
+  },
+  {
+    "instance": "refinery.json",
+    "solver": "cpu",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.001746019
+  },
+  {
+    "instance": "refinery.json",
+    "solver": "cuda",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.253455047
+  },
+  {
+    "instance": "refinery.json",
+    "solver": "highs",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.003345048000483075
+  },
+  {
+    "instance": "supply_chain.json",
+    "solver": "cpu",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.003896646
+  },
+  {
+    "instance": "supply_chain.json",
+    "solver": "cuda",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 1.051642952
+  },
+  {
+    "instance": "supply_chain.json",
+    "solver": "highs",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.04177005900055519
+  },
+  {
+    "instance": "coupled_dispatch.json",
+    "solver": "cpu",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.000978388
+  },
+  {
+    "instance": "coupled_dispatch.json",
+    "solver": "cuda",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.224694895
+  },
+  {
+    "instance": "coupled_dispatch.json",
+    "solver": "highs",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.003273065998655511
+  },
+  {
+    "instance": "integer_dispatch.json",
+    "solver": "cpu",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.007456123
+  },
+  {
+    "instance": "integer_dispatch.json",
+    "solver": "cuda",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.340912677
+  },
+  {
+    "instance": "integer_dispatch.json",
+    "solver": "highs",
+    "optimal_runs": 0,
+    "total_runs": 3,
+    "statuses": [
+      "NOT_SET",
+      "NOT_SET",
+      "NOT_SET"
+    ],
+    "median_end_to_end_seconds": 0.0013056659990979824
+  },
+  {
+    "instance": "scheduling.json",
+    "solver": "cpu",
+    "optimal_runs": 0,
+    "total_runs": 3,
+    "statuses": [
+      "UNKNOWN",
+      "UNKNOWN",
+      "UNKNOWN"
+    ],
+    "median_end_to_end_seconds": 0.080716839
+  },
+  {
+    "instance": "scheduling.json",
+    "solver": "cuda",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 4.166416519999999
+  },
+  {
+    "instance": "scheduling.json",
+    "solver": "highs",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.045820245999493636
+  },
+  {
+    "instance": "production.json",
+    "solver": "cpu",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.000529841
+  },
+  {
+    "instance": "production.json",
+    "solver": "cuda",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.242118824
+  },
+  {
+    "instance": "production.json",
+    "solver": "highs",
+    "optimal_runs": 3,
+    "total_runs": 3,
+    "statuses": [
+      "OPTIMAL",
+      "OPTIMAL",
+      "OPTIMAL"
+    ],
+    "median_end_to_end_seconds": 0.0020473299991863314
+  }
+]
