@@ -88,3 +88,6 @@ class Model:
 
 
 from .planning import SolverSession, diagnose_infeasibility, propose_repair
+from .native import NativeSession
+from .sensitivity import rhs_sensitivity
+from .stability import stable_plan_model, replan

@@ -77,6 +77,10 @@ A changed model requires `--warm-start previous.json --allow-model-change`; vari
 
 ## Python
 
+[Stable replanning and signed evidence](docs/trust_and_stable_planning.md) let you penalize changes to an approved plan, lock executed decisions, and authenticate solve bundles with separately trusted public keys. Run `python3 examples/stable_refinery_plan.py` for the synthetic CPU demonstration.
+
+The [native interface, evidence bundles and measured sensitivity reports](docs/competitor_features_20260928.md) provide in-process C/Python sessions and offline checks of exported solves. These extensions preserve the independent numerical core; GPU validation remains separate.
+
 Persistent model sessions, coupled refinery disruption scenarios and explicitly authorized infeasibility repair proposals are available. See [refinery replanning](docs/refinery_replanning.md); run `python3 examples/refinery_replanning.py` after building. These are synthetic CPU-validated demonstrations, not industrial performance claims.
 
 ```bash
