@@ -23,3 +23,8 @@ Start here when preparing explanations, slides, submissions, or further research
 | [Dashboard guide](../dashboard/README.md) | Starting and using the local dashboard |
 
 Raw run files remain in `results/`; generated results are not automatically versioned. Archive the exact result directory, executable, manifest and dataset checksums with any submission. Documentation must name the measured version/configuration and distinguish historical results from current experiments.
+
+## Independent certificates
+
+See [certificate lifecycle, CLI/API, replay checks and limitations](certificates.md).
+Run `scripts/run_certificate_demo.sh` for an offline valid → invalid → valid demonstration.

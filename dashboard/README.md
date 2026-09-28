@@ -51,3 +51,8 @@ The dashboard loads the latest completed demonstration campaign, the verified la
 The million-variable card reports end-to-end speedup separately from iteration speedup. Objective agreement uses paired optimal continuous results, never a timeout objective as a reference optimum. MILP and MIQP rows display global MIP gaps. Detail drawers expose standalone verification, node counts, bounds and the relevant raw report.
 
 The overview and reference page describe implemented methods, checkpoint state and restricted features alongside pending work. For very large interactive solves, APIs return a 256-entry vector preview; saved result files and the Download solution endpoint retain the complete vectors. Copy summary JSON is explicitly a preview, not a transferable numerical certificate.
+
+## Independent certificates
+
+See [certificate lifecycle, CLI/API, replay checks and limitations](../docs/certificates.md).
+Run `scripts/run_certificate_demo.sh` for an offline valid → invalid → valid demonstration.

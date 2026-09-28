@@ -79,6 +79,16 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(len(job['result']['primal']),1000)
         self.assertEqual(server.public_job(job,full=True)['result']['primal'],values)
 
+    def test_certificate_downloads(self):
+        import subprocess
+        result=subprocess.run([str(server.BINARY),'solve',str(self.original_root/'examples/toy.lp'),'--device','cpu'],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        payload=json.loads(result.stdout)
+        server.JOBS['certificate-test']=dict(id='certificate-test',result=payload)
+        certificate=self.get('/api/runs/certificate-test/certificate')
+        self.assertTrue(certificate['verification']['valid'])
+        self.assertEqual(self.get('/api/runs/certificate-test/verification_report'),certificate['verification'])
+
     def test_documentation_download_is_allowlisted(self):
         folder=server.ROOT/'docs';folder.mkdir(exist_ok=True)
         file=folder/'solver_completion_20260927.md';file.write_text('Current implementation scope')

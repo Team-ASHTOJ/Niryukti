@@ -45,3 +45,8 @@ The time limit and iteration budget are separate. An `ITERATION_LIMIT` can occur
 ```
 
 In the Phase 2 exploratory runs, e226 converges after 138,100 CPU / 144,479 GPU accepted iterations. The standard comparison still records its failure at the common 100,000 cap. Larger budgets are not guaranteed to resolve every limited model.
+
+## Independent certificates
+
+See [certificate lifecycle, CLI/API, replay checks and limitations](certificates.md).
+Run `scripts/run_certificate_demo.sh` for an offline valid → invalid → valid demonstration.

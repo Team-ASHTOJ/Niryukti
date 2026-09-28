@@ -11,6 +11,7 @@ public:
     std::string fingerprint() const { return model.fingerprint(); }
     json request(const json &request) {
             auto action = request.at("action").get<std::string>();
+            if(action == "verify_certificate") return json::parse(verify_certificate_json(model, request.at("certificate").dump()));
             const std::vector<std::string> allowed = action == "update"
                 ? std::vector<std::string>{"action","rows","variables","objective"}
                 : std::vector<std::string>{"action","device","method","time_limit","tol","threads","iterations","warm_start"};
@@ -65,6 +66,7 @@ public:
                 interrupted = 0;
                 auto result = solve(model, options);
                 auto output = json::parse(result_json(model, result));
+                output["verification_certificate"] = json::parse(certificate_json(model, result, options));
                 output["session"] = {{"warm_start_requested",request.value("warm_start",true)}, {"model_retained",true}};
                 if (result.accuracy.finite) previous = result;
                 return output;

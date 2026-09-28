@@ -33,5 +33,8 @@ class NativeSession(SolverSession):
         raw=self._lib.vantage_request(self._handle,json.dumps(dict(action=action,**fields),allow_nan=False).encode())
         if raw is None: raise ValueError(self._lib.vantage_last_error().decode())
         return json.loads(raw)
+    def verify_certificate(self, certificate):
+        return self._request("verify_certificate", certificate=certificate)
+
     def close(self):
         if self._handle:self._lib.vantage_close(self._handle);self._handle=None

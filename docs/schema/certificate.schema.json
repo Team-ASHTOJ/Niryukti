@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NIRYUKTI certificate 1.0",
+  "type": "object",
+  "required": [
+    "certificate_schema_version",
+    "solver",
+    "solver_version",
+    "model_fingerprint",
+    "dimensions",
+    "problem_type",
+    "objective_sense",
+    "termination_status",
+    "configuration",
+    "tolerances",
+    "kind",
+    "verification",
+    "payload_sha256"
+  ],
+  "properties": {
+    "certificate_schema_version": {
+      "const": "1.0"
+    },
+    "solver": {
+      "const": "NIRYUKTI"
+    },
+    "solver_version": {
+      "type": "string"
+    },
+    "model_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "dimensions": {
+      "type": "object",
+      "required": [
+        "variables",
+        "constraints",
+        "nonzeros"
+      ],
+      "properties": {
+        "variables": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "constraints": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nonzeros": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "problem_type": {
+      "enum": [
+        "LP",
+        "QP",
+        "MILP",
+        "MIQP"
+      ]
+    },
+    "objective_sense": {
+      "enum": [
+        "min",
+        "max"
+      ]
+    },
+    "termination_status": {
+      "type": "string"
+    },
+    "configuration": {
+      "type": "object",
+      "required": [
+        "backend",
+        "method",
+        "scaling",
+        "solver_tolerance"
+      ],
+      "properties": {
+        "backend": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "scaling": {
+          "type": "string"
+        },
+        "solver_tolerance": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "tolerances": {
+      "type": "object",
+      "required": [
+        "feasibility",
+        "integrality",
+        "gap"
+      ],
+      "properties": {
+        "feasibility": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1e-06
+        },
+        "integrality": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1e-06
+        },
+        "gap": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 0.0001
+        }
+      }
+    },
+    "kind": {
+      "enum": [
+        "solution",
+        "infeasibility"
+      ]
+    },
+    "verification": {
+      "type": "object",
+      "required": [
+        "valid",
+        "status"
+      ],
+      "properties": {
+        "valid": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "checks": {
+          "type": "object"
+        },
+        "metrics": {
+          "type": "object"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "payload_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "objective": {
+      "type": "number"
+    },
+    "primal": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "dual": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "ray": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "verification_evidence": {
+      "type": "object"
+    },
+    "git_commit": {
+      "type": "string"
+    },
+    "solver_bound_telemetry": {
+      "type": "object",
+      "required": [
+        "canonical_global_bound",
+        "relative_gap"
+      ],
+      "properties": {
+        "canonical_global_bound": {
+          "type": "number"
+        },
+        "relative_gap": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "solution"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "primal",
+          "dual",
+          "objective"
+        ]
+      },
+      "else": {
+        "required": [
+          "ray"
+        ]
+      }
+    }
+  ]
+}

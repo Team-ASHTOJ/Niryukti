@@ -164,3 +164,8 @@ docker run --gpus all --rm vantage:cuda devices
 Dockerfiles provide reproducible build recipes; image validation and actual measured campaigns are recorded separately. `auto` selects compact CPU simplex where supported; otherwise it retains PDHG. Root cuts and new CUDA monitoring remain opt-in. First-order/tree checkpoints, experimental barrier/dual simplex, batched branching probes and restricted binary conflicts are now implemented and tested. Their limitations and hardware-validation boundaries are documented in the completion record; AMD remains deferred.
 
 Current completion-round implementation, usage, trust boundaries and hardware validation: [solver completion record](docs/solver_completion_20260927.md).
+
+## Independent certificates
+
+See [certificate lifecycle, CLI/API, replay checks and limitations](docs/certificates.md).
+Run `scripts/run_certificate_demo.sh` for an offline valid → invalid → valid demonstration.

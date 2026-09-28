@@ -14,3 +14,4 @@ VANTAGE_BINARY="${1:-build}/vantage" python3 tests/test_trust_and_replanning.py
 VANTAGE_TEST_BINARY="${1:-build}/vantage" python3 tests/test_benchmark.py
 VANTAGE_TEST_BINARY="${1:-build}/vantage" python3 dashboard/tests/test_dashboard.py
 python3 scripts/check_dependencies.py
+VANTAGE_BINARY="${1:-build}/vantage" python3 tests/test_certificates.py

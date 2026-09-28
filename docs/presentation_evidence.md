@@ -45,3 +45,8 @@ The core does not call HiGHS, SCIP, Gurobi or another optimization solver. HiGHS
 - Reproducible Phase 2 results: [phase2_results.md](phase2_results.md), generated from `results/phase2-baseline` and `results/phase2-final`. NIRYUKTI solves 8/9 selected cases on both CPU and CUDA, up from 6/9; HiGHS solves 9/9. The remaining e226 failure and ADLITTLE GPU regression are retained.
 
 The separate 200,000-iteration e226 campaign succeeds on both NIRYUKTI backends in all three repetitions. Present it as a budget-sensitivity example, alongside its standard-budget limit, rather than merging different budgets into a single solve-rate claim.
+
+## Independent certificates
+
+See [certificate lifecycle, CLI/API, replay checks and limitations](certificates.md).
+Run `scripts/run_certificate_demo.sh` for an offline valid → invalid → valid demonstration.

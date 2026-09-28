@@ -299,6 +299,11 @@ class Handler(BaseHTTPRequestHandler):
                 parts = path.split('/'); key = parts[3]
                 with LOCK: job = JOBS.get(key)
                 if not job: return self.send(404, dict(error='Run not found'))
+                if len(parts)>4 and parts[4] in ('certificate', 'verification_report'):
+                    certificate = job.get('result', {}).get('verification_certificate')
+                    if certificate is None: return self.send(404, dict(error='Certificate unavailable'))
+                    value = certificate if parts[4]=='certificate' else certificate.get('verification', {})
+                    return self.send(200, value, filename=parts[4]+'.json')
                 if len(parts)>4 and parts[4]=='download':
                     return self.send(200, job.get('result', {}), filename=f'vantage-{key}.json')
                 item=public_job(job).copy(); log=STORE/f'{key}.log'

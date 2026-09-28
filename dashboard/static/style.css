@@ -657,3 +657,15 @@ td small{display:block;color:var(--muted);font:400 12px var(--font);margin-top:3
 [data-graph-detail]:focus-visible{outline:2px solid var(--gold-ink);outline-offset:3px}
 .graph-sample{fill:transparent;stroke:transparent;pointer-events:all}
 .graph-sample:hover,.graph-sample:focus{fill:var(--gold-ink);stroke:var(--surface);stroke-width:2}
+
+
+/* Certificate diagnostics are dense data; keep the values compact and readable. */
+.certificate-panel .verification-list{margin:14px 0}
+.certificate-panel .verification-list>div{padding:10px 0;gap:14px;align-items:baseline}
+.certificate-panel .verification-list dt{font-size:12px;line-height:1.45}
+.certificate-panel .verification-list dd{font:400 13px/1.5 var(--mono);letter-spacing:0;text-align:right;max-width:62%;overflow-wrap:anywhere}
+.certificate-panel details{margin:12px 0}
+.certificate-panel details summary{font-size:13px;cursor:pointer}
+.certificate-panel details p{font-size:12.5px;line-height:1.6;color:var(--muted)}
+.certificate-panel pre{max-height:440px;overflow:auto;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--sunken);font:11px/1.55 var(--mono);white-space:pre;tab-size:2}
+.certificate-panel .button{font-size:12.5px}

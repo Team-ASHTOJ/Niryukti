@@ -38,3 +38,8 @@ State continuation is explicit: first-order snapshots include actual backend/hos
 The local dashboard isolates CLI and external benchmark processes, bounds requests, supports process-group cancellation and protects mutations with a session token. Benchmark pages read small CSV summaries; large solution vectors are previewed in APIs while complete downloads remain available. Benchmark adapters for HiGHS/default-IPM and SCIP live outside the product solving path. Exact measured source/binary hashes and failed runs are retained.
 
 See [algorithm details](algorithms.md), [current limits and validation](solver_completion_20260927.md), and [stress methodology](stress_campaign_20260927.md).
+
+## Independent certificates
+
+See [certificate lifecycle, CLI/API, replay checks and limitations](certificates.md).
+Run `scripts/run_certificate_demo.sh` for an offline valid → invalid → valid demonstration.

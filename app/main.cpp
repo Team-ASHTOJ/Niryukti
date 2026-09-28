@@ -132,6 +132,15 @@ int main(int argc, char **argv) {
         if (cmd == "verify") {
             if (argc != 4)
                 throw std::runtime_error("verify MODEL SOLUTION");
+            std::ifstream input(argv[3], std::ios::binary | std::ios::ate);
+            if (!input || input.tellg() > 64*1024*1024) throw std::runtime_error("Invalid or oversized verification input");
+            input.seekg(0); std::string raw((std::istreambuf_iterator<char>(input)), {});
+            auto document = nlohmann::json::parse(raw, [](int depth, nlohmann::json::parse_event_t, const nlohmann::json &) { if (depth > 32) throw std::runtime_error("Verification input nesting limit"); return true; });
+            if (document.contains("certificate_schema_version")) {
+                auto report = nlohmann::json::parse(verify_certificate_json(m, raw));
+                std::cout << report.dump(2) << '\n';
+                return report.at("valid").get<bool>() ? 0 : 2;
+            }
             auto r = read_solution(m, argv[3]);
             if (!r.infeasibility_ray.empty()) {
                 Verifier verifier(m);
@@ -233,7 +242,7 @@ int main(int argc, char **argv) {
                 o.cuts = true;
             else if (a == "--json-out" || a == "--solution-out")
                 output = val();
-            else if (a == "--certificate-out")
+            else if (a == "--certificate-out" || a == "--certificate")
                 certificate_output = val();
             else if (a == "--checkpoint-out")
                 o.checkpoint_path = val();
@@ -294,11 +303,12 @@ int main(int argc, char **argv) {
                                  : "original-space KKT and dual bound"},
             {"independent_final_check", r.accuracy.finite},
             {"tree_optimality_replayed", false}};
+        j["verification_certificate"] = nlohmann::json::parse(certificate_json(m, r, o));
         if (!certificate_output.empty()) {
             std::ofstream cert(certificate_output);
             if (!cert)
                 throw std::runtime_error("Cannot write certificate");
-            cert << j.dump(2) << '\n';
+            cert << j["verification_certificate"].dump(2) << '\n';
         }
         if (!output.empty()) {
             std::ofstream f(output);

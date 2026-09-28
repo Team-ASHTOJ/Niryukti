@@ -91,3 +91,26 @@ from .planning import SolverSession, diagnose_infeasibility, propose_repair
 from .native import NativeSession
 from .sensitivity import rhs_sensitivity
 from .stability import stable_plan_model, replan
+
+
+def verify_certificate(model, certificate, *, binary=None):
+    """Replay a certificate using the C++ verifier; returns detailed diagnostics."""
+    with tempfile.TemporaryDirectory(prefix='niryukti-certificate-') as folder:
+        folder = Path(folder)
+        if isinstance(model, Model) or isinstance(model, dict):
+            path = folder / 'model.json'
+            path.write_text(json.dumps(model.data if isinstance(model, Model) else model, allow_nan=False))
+        else:
+            path = Path(model)
+        if isinstance(certificate, dict):
+            cert = folder / 'certificate.json'
+            try:
+                cert.write_text(json.dumps(certificate, allow_nan=False))
+            except (ValueError, TypeError) as error:
+                return dict(valid=False, status='INVALID', reason=str(error))
+        else:
+            cert = Path(certificate)
+        result = subprocess.run([_binary(binary), 'verify', str(path), str(cert)], capture_output=True, text=True)
+        if result.returncode not in (0, 2):
+            return dict(valid=False, status='INVALID', reason=result.stderr.strip())
+        return json.loads(result.stdout)
