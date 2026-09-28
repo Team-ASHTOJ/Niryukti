@@ -108,3 +108,7 @@ Pulled the friend’s replanning, native C ABI, evidence and stability extension
 ## 2026-09-28 — copyleft licensing and release automation
 
 Adopted AGPL-3.0-only for original code at the user’s request to keep covered redistributed/network modifications open. Added LICENSE, NOTICE, package SPDX metadata, contribution terms and full numerical license notices. Added a manually triggered manylinux Python/npm build-and-test workflow with separate OIDC publishing environments. Account-side PyPI/npm setup is still required; passwords/tokens are not requested in chat. See [publishing guide](publishing.md).
+
+## 2026-09-28 — public NIRYUKTI distribution names
+
+Renamed PyPI/npm distributions and installed CLI to `niryukti`; added `niryukti` Python imports with legacy implementation compatibility. The native CLI now builds as `niryukti`, retaining a developer-only `vantage` copy for existing scripts. Publisher configuration must use the PyPI/npm project name `niryukti`, not the earlier provisional name.

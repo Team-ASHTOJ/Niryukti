@@ -17,9 +17,9 @@ jobs:
       - run: python -m pip install build twine
       - run: python -m build && python -m twine check dist/*
       - run: python -m pip install dist/*.whl
-      - run: cp tests/packaging/python_smoke.py /tmp/python_smoke.py && cd /tmp && vantage devices && python python_smoke.py
+      - run: cp tests/packaging/python_smoke.py /tmp/python_smoke.py && cd /tmp && niryukti devices && python python_smoke.py
       - run: python scripts/package_npm.py --output /tmp/npm-dist
-      - run: mkdir /tmp/node-consumer && cd /tmp/node-consumer && npm install /tmp/npm-dist/*.tgz && node node_modules/vantage-opt/install.js && npx vantage devices && node node_modules/vantage-opt/smoke.cjs
+      - run: mkdir /tmp/node-consumer && cd /tmp/node-consumer && npm install /tmp/npm-dist/*.tgz && node node_modules/niryukti/install.js && npx niryukti devices && node node_modules/niryukti/smoke.cjs
       - uses: actions/upload-artifact@v4
         with:
           name: linux-distributions

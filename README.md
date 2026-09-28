@@ -27,9 +27,9 @@ Python wheels now bundle the CPU engine and native C library; the npm source pac
 ```bash
 ./scripts/build.sh                 # Detect CUDA; otherwise build CPU only
 ./scripts/run_tests.sh
-./build/vantage devices
-./build/vantage solve examples/refinery.json --device cuda --json-out result.json
-./build/vantage verify examples/refinery.json result.json
+./build/niryukti devices
+./build/niryukti solve examples/refinery.json --device cuda --json-out result.json
+./build/niryukti verify examples/refinery.json result.json
 ./scripts/run_demo.sh
 ```
 
@@ -68,14 +68,14 @@ Requirements: CMake ≥3.24, a C++20 compiler, Python ≥3.10 for scripts. CUDA 
 ## CLI examples
 
 ```bash
-./build/vantage inspect datasets/afiro.mps
-./build/vantage explain examples/refinery.json
-./build/vantage solve datasets/afiro.mps --device cpu --tol 1e-6 --threads 4
-./build/vantage solve examples/dispatch.json --device cuda
-./build/vantage solve examples/supply_chain.json --time-limit 30 --mip-gap 1e-4
-./build/vantage convert examples/toy.lp /tmp/toy.mps
-./build/vantage solve examples/refinery.json --json-out /tmp/first.json
-./build/vantage solve examples/refinery.json --warm-start /tmp/first.json
+./build/niryukti inspect datasets/afiro.mps
+./build/niryukti explain examples/refinery.json
+./build/niryukti solve datasets/afiro.mps --device cpu --tol 1e-6 --threads 4
+./build/niryukti solve examples/dispatch.json --device cuda
+./build/niryukti solve examples/supply_chain.json --time-limit 30 --mip-gap 1e-4
+./build/niryukti convert examples/toy.lp /tmp/toy.mps
+./build/niryukti solve examples/refinery.json --json-out /tmp/first.json
+./build/niryukti solve examples/refinery.json --warm-start /tmp/first.json
 python3 examples/warm_resolve.py
 ```
 
@@ -120,7 +120,7 @@ python3 -m venv .venv
 
 python3 examples/generate.py --crudes 16 --products 8 --periods 365 \
   --output datasets/refinery_large.json
-./build/vantage convert datasets/refinery_large.json datasets/refinery_large.mps
+./build/niryukti convert datasets/refinery_large.json datasets/refinery_large.mps
 .venv/bin/python benchmark/run.py datasets/refinery_large.mps \
   --runs 3 --threads 4 --time-limit 60 --output results/scalability
 ```
@@ -152,10 +152,10 @@ The [documentation index](docs/README.md) links the [development log](docs/devel
 Current scope, integration and remaining algorithms: [27 September engineering record](docs/submission_round_20260927.md).
 
 ```bash
-./build/vantage solve datasets/adlittle.mps --device cpu --method auto
-./build/vantage solve examples/coupled_dispatch.json --device cuda --gpu-monitor
-./build/vantage solve examples/integer_dispatch.json --certificate-out /tmp/miqp.json
-./build/vantage verify examples/integer_dispatch.json /tmp/miqp.json
+./build/niryukti solve datasets/adlittle.mps --device cpu --method auto
+./build/niryukti solve examples/coupled_dispatch.json --device cuda --gpu-monitor
+./build/niryukti solve examples/integer_dispatch.json --certificate-out /tmp/miqp.json
+./build/niryukti verify examples/integer_dispatch.json /tmp/miqp.json
 python3 benchmark/download_public.py --suite netlib
 python3 benchmark/download_public.py --suite qplib
 ./scripts/reproduce_submission.sh

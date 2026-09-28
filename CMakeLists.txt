@@ -54,9 +54,12 @@ add_library(vantage_c SHARED src/c_api.cpp)
 target_include_directories(vantage_c PRIVATE third_party)
 target_link_libraries(vantage_c PRIVATE vantage)
 set_target_properties(vantage_c PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
-set_target_properties(vantage_cli PROPERTIES OUTPUT_NAME vantage)
+set_target_properties(vantage_cli PROPERTIES OUTPUT_NAME niryukti)
 target_include_directories(vantage_cli PRIVATE third_party)
 target_link_libraries(vantage_cli PRIVATE vantage)
+# Keep existing developer scripts working while the installed CLI uses NIRYUKTI.
+add_custom_command(TARGET vantage_cli POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy
+ $<TARGET_FILE:vantage_cli> ${CMAKE_CURRENT_BINARY_DIR}/vantage${CMAKE_EXECUTABLE_SUFFIX})
 include(CTest)
 if(BUILD_TESTING)
 add_executable(vantage_tests tests/test_core.cpp)

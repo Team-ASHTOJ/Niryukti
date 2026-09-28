@@ -1,12 +1,12 @@
 # VANTAGE distribution
 
-`vantage-opt` packages the independently implemented C++ optimization engine.
+`niryukti` packages the independently implemented C++ optimization engine.
 Python wheels contain the CPU executable and native C ABI library; no existing
 optimization solver is used. Python 3.10+ is required. Source installations need
 CMake 3.24+ and a C++20 compiler. Default wheels use FP64 and do not require CUDA.
 
 ```python
-from vantage import Model, NativeSession
+from niryukti import Model, NativeSession
 m = Model()
 m.add_var("x", ub=10)
 m.add_constraint({"x": 1}, ">=", 2)
@@ -16,7 +16,7 @@ with NativeSession(m) as session:
 ```
 
 Build: `python -m build`. Install a generated wheel with `pip install dist/*.whl`.
-The installed `vantage` command exposes the engine CLI. CUDA builds can be used
+The installed `niryukti` command exposes the engine CLI. CUDA builds can be used
 through `VANTAGE_BINARY` and `VANTAGE_LIBRARY`; CUDA is not bundled into CPU wheels.
 
 License: **AGPL-3.0-only**. Modified covered redistributions must retain AGPL;

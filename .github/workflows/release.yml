@@ -31,7 +31,7 @@ jobs:
         with:
           node-version: '24'
       - run: python3 scripts/package_npm.py --output /tmp/npm-dist
-      - run: mkdir /tmp/node-consumer && cd /tmp/node-consumer && npm install /tmp/npm-dist/*.tgz && node node_modules/vantage-opt/install.js && node node_modules/vantage-opt/smoke.cjs
+      - run: mkdir /tmp/node-consumer && cd /tmp/node-consumer && npm install /tmp/npm-dist/*.tgz && node node_modules/niryukti/install.js && node node_modules/niryukti/smoke.cjs
       - uses: actions/upload-artifact@v4
         with:
           name: npm-release

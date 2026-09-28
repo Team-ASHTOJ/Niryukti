@@ -15,7 +15,7 @@ Primary reference: https://www.gnu.org/licenses/agpl-3.0.en.html
 
 1. Create/sign into a PyPI account with two-factor authentication.
 2. In account Publishing settings, add a **pending GitHub publisher**:
-   - Project name: `vantage-opt`
+   - Project name: `niryukti`
    - Owner: `shoaib2000857`
    - Repository: `Vantage`
    - Workflow filename: `release.yml`
@@ -40,13 +40,13 @@ in chat), then publish the reviewed source tarball:
 
 ```sh
 npm login
-npm publish /absolute/path/to/vantage-opt-0.2.0.tgz --access public
+npm publish /absolute/path/to/niryukti-0.2.0.tgz --access public
 ```
 
 Complete any npm account/2FA prompts in your own terminal/browser. The workflow's
 npm publish job will fail until package ownership and OIDC are configured.
 
-In `vantage-opt` package settings, configure GitHub trusted publishing:
+In `niryukti` package settings, configure GitHub trusted publishing:
 owner `shoaib2000857`, repository `Vantage`, workflow `release.yml`, environment
 `npm`. Create that GitHub environment as well. Allow direct `npm publish` for
 this workflow. Node 24 runners supply a sufficiently recent npm CLI; current npm
@@ -79,12 +79,12 @@ After publishing, verify from clean directories:
 
 ```sh
 python -m venv /tmp/vantage-public-test
-/tmp/vantage-public-test/bin/pip install vantage-opt
-/tmp/vantage-public-test/bin/vantage devices
+/tmp/vantage-public-test/bin/pip install niryukti
+/tmp/vantage-public-test/bin/niryukti devices
 mkdir /tmp/vantage-public-node-test && cd /tmp/vantage-public-node-test
-npm install vantage-opt
-node node_modules/vantage-opt/install.js
-node node_modules/vantage-opt/smoke.cjs
+npm install niryukti
+node node_modules/niryukti/install.js
+node node_modules/niryukti/smoke.cjs
 ```
 
 These commands describe the post-publication test, not evidence that upload has

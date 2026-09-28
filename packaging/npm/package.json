@@ -1,5 +1,5 @@
 {
-  "name": "vantage-opt",
+  "name": "niryukti",
   "version": "0.2.0",
   "description": "Independent native sparse optimization engine for Node.js",
   "main": "index.js",
@@ -13,7 +13,7 @@
     "test": "node smoke.cjs"
   },
   "bin": {
-    "vantage": "cli.js"
+    "niryukti": "cli.js"
   },
   "files": [
     "index.js",

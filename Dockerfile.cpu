@@ -13,11 +13,11 @@ RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DVANTAGE_CUDA=OFF && cmake -
 FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends python3 libgomp1 && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/vantage
-COPY --from=build /src/build/vantage build/vantage
+COPY --from=build /src/build/niryukti build/niryukti
 COPY --from=build /src/build/libvantage_c.so build/libvantage_c.so
 COPY python python
 ENV PYTHONPATH=/opt/vantage/python
-ENV VANTAGE_BINARY=/opt/vantage/build/vantage
+ENV VANTAGE_BINARY=/opt/vantage/build/niryukti
 ENV VANTAGE_LIBRARY=/opt/vantage/build/libvantage_c.so
 COPY dashboard dashboard
 COPY examples examples
@@ -26,5 +26,5 @@ COPY docs docs
 COPY LICENSE NOTICE ./
 RUN useradd --create-home solver && mkdir -p results && chown solver:solver results
 USER solver
-ENTRYPOINT ["/opt/vantage/build/vantage"]
+ENTRYPOINT ["/opt/vantage/build/niryukti"]
 CMD ["devices"]

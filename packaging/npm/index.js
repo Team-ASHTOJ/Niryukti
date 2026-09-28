@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 function executable(binary) {
-  return binary || process.env.VANTAGE_BINARY || path.join(__dirname, 'native', 'vantage');
+  return binary || (process.env.NIRYUKTI_BINARY || process.env.VANTAGE_BINARY) || path.join(__dirname, 'native', 'niryukti');
 }
 async function solve(model, options = {}) {
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'vantage-node-'));
