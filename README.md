@@ -2,9 +2,53 @@
 
 **Independent Sparse Optimization Engine**
 
-An independent sparse optimization engine for SIH26119, built in C++20 with an optional CUDA backend. The first prototype solves LPs, supported sparse convex QPs, small MILPs and convex MIQPs using its own numerical algorithms. No existing optimization solver is used to solve a NIRYUKTI model.
+An independent sparse optimization engine built in C++20 with an optional CUDA backend. The first prototype solves LPs, supported sparse convex QPs, small MILPs and convex MIQPs using its own numerical algorithms. No existing optimization solver is used to solve a NIRYUKTI model.
 
 **Research prototype:** numerical correctness is tested on representative cases; industrial robustness, unrestricted large sparse PSD validation, and competitive large-scale MILP performance remain development work. The name does not imply support for general nonconvex global optimization.
+
+## Automatic solver selection
+
+`niryukti solve model.mps --method auto --device auto --json-out result.json`
+uses model structure, available GPU memory and requested controls to select a
+supported algorithm and backend. Compact CPU LPs can use simplex; suitable small
+coupled QPs can use the experimental barrier; large sparse models use PDHG.
+Numerical failures can fall back to verified PDHG within the remaining budget.
+`niryukti explain model.mps` describes the selection policy. Explicit
+method/device flags remain available. Selection is a rule-based policy, not a
+promise that the chosen method is fastest on every instance.
+
+## API service and reports
+
+The Python package includes an authenticated local HTTP API and offline HTML
+reports; the Node package also exports `renderReport` and a report CLI.
+
+```bash
+export NIRYUKTI_API_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+niryukti serve --host 127.0.0.1 --port 8090
+# In another terminal, after solving a model:
+niryukti report result.json --output report.html
+```
+
+Routes: `GET /v1/health`, `POST /v1/solve`, and `POST /v1/report`. Authentication,
+request size, concurrency and time limits are enforced. See [API examples and
+limits](docs/api.md). A report displays saved results; independently verify the
+solution before treating it as certified. These additions are in the current
+source; the previously published 0.2.0 packages do not include them.
+
+## Validate another NVIDIA laptop
+
+```bash
+./scripts/validate_cuda_laptop.sh
+# Also test the standard NVIDIA Docker runtime:
+./scripts/validate_cuda_laptop.sh --docker
+```
+
+Requires CMake, a C++20 compiler, Python, CUDA toolkit and an NVIDIA GPU. The
+script builds, runs correctness tests, solves CPU/CUDA/auto examples, verifies
+results and saves logs, hardware details and checksums under `results/laptop-*`.
+It does not install drivers or change system configuration. Docker GPU tests
+require a working NVIDIA Container Toolkit. Passing here does not replace
+validation on a second physical laptop.
 
 ## Dashboard
 
@@ -14,14 +58,31 @@ An independent sparse optimization engine for SIH26119, built in C++20 with an o
 
 Open **http://127.0.0.1:8080** for the local dashboard: solver overview, capability/pending-work cards, large-model and public-baseline comparisons, accuracy details, model library, live CPU/GPU solves, model import and downloadable results. The interface uses real saved measurements and the actual solver executable. See [dashboard documentation](dashboard/README.md).
 
+## License
+
+Original project code is licensed **AGPL-3.0-only**. Covered modified redistributions must remain under AGPL; modified network deployments must offer corresponding source to users. Commercial use and copying are permitted. See [LICENSE](LICENSE), [third-party notices](NOTICE), and [publishing setup](docs/publishing.md).
+
+## Packages
+
+**NIRYUKTI 0.2.0 is published on [PyPI](https://pypi.org/project/niryukti/) and [npm](https://www.npmjs.com/package/niryukti)** under AGPL-3.0-only. Python Linux x86_64 wheels bundle the CPU engine and native C library; the npm package builds the included C++ engine locally.
+
+```sh
+pip install niryukti
+niryukti devices
+# Node.js: requires CMake 3.24+ and a C++20 compiler
+npm install niryukti
+```
+
+Python: `from niryukti import Model, NativeSession`. Node.js: `const {solve} = require("niryukti")`. Source installs require a compiler; CUDA remains available through a separately built engine. See [build/install instructions](packaging/README.md), [public release verification](docs/release_20260928.md), and [publisher setup](docs/publishing.md). Docker recipes include both CLI and Python/native APIs.
+
 ## Run it
 
 ```bash
 ./scripts/build.sh                 # Detect CUDA; otherwise build CPU only
 ./scripts/run_tests.sh
-./build/vantage devices
-./build/vantage solve examples/refinery.json --device cuda --json-out result.json
-./build/vantage verify examples/refinery.json result.json
+./build/niryukti devices
+./build/niryukti solve examples/refinery.json --device cuda --json-out result.json
+./build/niryukti verify examples/refinery.json result.json
 ./scripts/run_demo.sh
 ```
 
@@ -60,14 +121,14 @@ Requirements: CMake ≥3.24, a C++20 compiler, Python ≥3.10 for scripts. CUDA 
 ## CLI examples
 
 ```bash
-./build/vantage inspect datasets/afiro.mps
-./build/vantage explain examples/refinery.json
-./build/vantage solve datasets/afiro.mps --device cpu --tol 1e-6 --threads 4
-./build/vantage solve examples/dispatch.json --device cuda
-./build/vantage solve examples/supply_chain.json --time-limit 30 --mip-gap 1e-4
-./build/vantage convert examples/toy.lp /tmp/toy.mps
-./build/vantage solve examples/refinery.json --json-out /tmp/first.json
-./build/vantage solve examples/refinery.json --warm-start /tmp/first.json
+./build/niryukti inspect datasets/afiro.mps
+./build/niryukti explain examples/refinery.json
+./build/niryukti solve datasets/afiro.mps --device cpu --tol 1e-6 --threads 4
+./build/niryukti solve examples/dispatch.json --device cuda
+./build/niryukti solve examples/supply_chain.json --time-limit 30 --mip-gap 1e-4
+./build/niryukti convert examples/toy.lp /tmp/toy.mps
+./build/niryukti solve examples/refinery.json --json-out /tmp/first.json
+./build/niryukti solve examples/refinery.json --warm-start /tmp/first.json
 python3 examples/warm_resolve.py
 ```
 
@@ -112,7 +173,7 @@ python3 -m venv .venv
 
 python3 examples/generate.py --crudes 16 --products 8 --periods 365 \
   --output datasets/refinery_large.json
-./build/vantage convert datasets/refinery_large.json datasets/refinery_large.mps
+./build/niryukti convert datasets/refinery_large.json datasets/refinery_large.mps
 .venv/bin/python benchmark/run.py datasets/refinery_large.mps \
   --runs 3 --threads 4 --time-limit 60 --output results/scalability
 ```
@@ -144,10 +205,10 @@ The [documentation index](docs/README.md) links the [development log](docs/devel
 Current scope, integration and remaining algorithms: [27 September engineering record](docs/submission_round_20260927.md).
 
 ```bash
-./build/vantage solve datasets/adlittle.mps --device cpu --method auto
-./build/vantage solve examples/coupled_dispatch.json --device cuda --gpu-monitor
-./build/vantage solve examples/integer_dispatch.json --certificate-out /tmp/miqp.json
-./build/vantage verify examples/integer_dispatch.json /tmp/miqp.json
+./build/niryukti solve datasets/adlittle.mps --device cpu --method auto
+./build/niryukti solve examples/coupled_dispatch.json --device cuda --gpu-monitor
+./build/niryukti solve examples/integer_dispatch.json --certificate-out /tmp/miqp.json
+./build/niryukti verify examples/integer_dispatch.json /tmp/miqp.json
 python3 benchmark/download_public.py --suite netlib
 python3 benchmark/download_public.py --suite qplib
 ./scripts/reproduce_submission.sh
@@ -169,3 +230,5 @@ Current completion-round implementation, usage, trust boundaries and hardware va
 
 See [certificate lifecycle, CLI/API, replay checks and limitations](docs/certificates.md).
 Run `scripts/run_certificate_demo.sh` for an offline valid → invalid → valid demonstration.
+
+Current implementation and remaining work: [2026-09-28 record](docs/improvements_20260928.md).

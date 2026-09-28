@@ -14,6 +14,7 @@ std::vector<double> cuda_linear_solve(const Sparse &, const std::vector<double> 
                                       const Options &) {
     throw std::runtime_error("GPU Newton solve requires CUDA");
 }
+Hardware hardware_info() { return {}; }
 bool cuda_available() {
     return false;
 }

@@ -7,3 +7,5 @@ datasets/refinery_large.*
 dashboard/browser-tests/node_modules
 dashboard/browser-tests/test-results
 **/__pycache__
+
+datasets/stress_public

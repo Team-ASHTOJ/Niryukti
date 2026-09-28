@@ -10,18 +10,19 @@ from pathlib import Path
 
 
 def _binary(binary=None):
-    return str(binary or os.environ.get('VANTAGE_BINARY') or Path(__file__).resolve().parents[2] / 'build/vantage')
+    from ._runtime import executable
+    return executable(binary)
 
 
 def solve(path, *, device='auto', tol=1e-6, time_limit=60, threads=1, warm_start=None,
-          allow_model_change=False, binary=None, iterations=100000, method='pdhg',
+          allow_model_change=False, binary=None, iterations=100000, method='auto',
           scaling='ruiz', adaptive=True, branching='fractional', primal_weight='displacement',
           power_iterations=0, polishing=False, cuts=False, primal_heuristic="repair", cuda_graphs=False,
           gpu_indices="auto", matrix_precision="fp64", gpu_monitor=False, node_selection="best-bound", gpu_presolve=False,
           batch_strong_branching=False, checkpoint_out=None, resume=None, checkpoint_nodes=100):
     command=[_binary(binary),'solve',str(path),'--device',device,'--tol',str(tol),
              '--time-limit',str(time_limit),'--threads',str(threads),'--iterations',str(iterations),'--node-selection',node_selection]
-    if method!='pdhg':command+=['--method',method]
+    command+=['--method',method]
     if scaling!='ruiz':command+=['--scaling',scaling]
     if branching!='fractional':command+=['--branching',branching]
     if primal_weight!='displacement':command+=['--primal-weight',primal_weight]

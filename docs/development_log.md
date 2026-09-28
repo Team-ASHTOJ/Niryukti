@@ -100,3 +100,19 @@ Implemented actual CPU/CUDA first-order iterate checkpoints and full MIP frontie
 The scheduling regression exposed tiny forbidden-sign simplex row multipliers that prevented a finite safe bound. Projecting multipliers onto the exact interval dual domain, followed by independent re-verification, restored the proof path. Continuous node bounds now also receive conservative propagation. CPU/CUDA research tests include this regression, checkpoint continuation, GPU numerical Newton solves, large singular PSD acceptance/rejection and enumerated MILPs.
 
 Added an isolated SCIP baseline and an explicit large-model screening campaign: public railway/MIPLIB instances, Netlib convergence tests and a streamed million-variable planted LP. [The stress protocol](stress_campaign_20260927.md) distinguishes public models, derived LP relaxations and synthetic data. AMD remains deferred. Full GPU control/compaction, unrestricted conflict analysis, all-method checkpointing and physical second-laptop/container-GPU validation remain incomplete; no claim of commercial-grade completeness is made.
+
+## 2026-09-28 — upstream integration and distribution
+
+Pulled the friend’s replanning, native C ABI, evidence and stability extensions from origin/main (84bcc7e, 4c0f066). Added self-contained CPU Python wheel/sdist builds, installed native-artifact discovery and CLI, source-based npm API with TypeScript and cancellation, distribution CI, Docker native/Python support and a draft local Arch recipe. Full CPU/CLI/Python/dashboard checks passed. Registry publication and a top-level redistribution license remain pending. See [the integration and distribution record](distribution_20260928.md).
+
+## 2026-09-28 — copyleft licensing and release automation
+
+Adopted AGPL-3.0-only for original code at the user’s request to keep covered redistributed/network modifications open. Added LICENSE, NOTICE, package SPDX metadata, contribution terms and full numerical license notices. Added a manually triggered manylinux Python/npm build-and-test workflow with separate OIDC publishing environments. Account-side PyPI/npm setup is still required; passwords/tokens are not requested in chat. See [publishing guide](publishing.md).
+
+## 2026-09-28 — public NIRYUKTI distribution names
+
+Renamed PyPI/npm distributions and installed CLI to `niryukti`; added `niryukti` Python imports with legacy implementation compatibility. The native CLI now builds as `niryukti`, retaining a developer-only `vantage` copy for existing scripts. Publisher configuration must use the PyPI/npm project name `niryukti`, not the earlier provisional name.
+
+## 2026-09-28 — public package release
+
+Published `niryukti` 0.2.0 on PyPI via GitHub OIDC and on npm after the owner completed browser 2FA approval. Public registry installations passed Python CLI/subprocess/native and Node source-build/solve/error/cancellation checks; registry checksums matched retained artifacts. Recorded limits: initial prebuilt Python wheels are Linux x86_64 CPU, npm requires a compiler, CUDA remains a separately built backend, and future npm OIDC configuration is still an owner-side step. See [release evidence](release_20260928.md).

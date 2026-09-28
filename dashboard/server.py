@@ -21,7 +21,7 @@ from urllib.parse import unquote, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / 'dashboard/static'
-BINARY = Path(os.environ.get('VANTAGE_BINARY', str(ROOT / 'build/vantage')))
+BINARY = Path(os.environ.get('NIRYUKTI_BINARY', os.environ.get('VANTAGE_BINARY', str(ROOT / 'build/niryukti'))))
 STORE = ROOT / 'results/dashboard'
 TOKEN = secrets.token_urlsafe(32)
 LOCK = threading.Lock()
@@ -254,7 +254,7 @@ def run_job(job, options):
     finally:
         job.pop('process',None)
         job['finished_at'] = time.time()
-        (STORE/f"{job['id']}.json").write_text(json.dumps(clean(public_job(job)), indent=2))
+        (STORE/f"{job['id']}.json").write_text(json.dumps(clean(public_job(job,full=True)), indent=2))
 
 
 class Handler(BaseHTTPRequestHandler):
