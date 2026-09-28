@@ -327,17 +327,51 @@ Result solve_mip(const Model &original, const Options &options) {
     };
     auto learn_conflict = [&](const Node &node) {
         Conflict conflict;
+        bool nonbinary_changes = false;
         for (size_t j = 0; j < original.c.size(); ++j) {
-            if (original.types[j] != VarType::Binary) {
-                // This deliberately excludes nonbinary branch conditions from binary no-goods.
-                if (node.lb[j] != base_lb[j] || node.ub[j] != base_ub[j])
-                    return;
-            } else if (node.lb[j] == node.ub[j])
+            if (original.types[j] != VarType::Binary)
+                nonbinary_changes |= node.lb[j] != base_lb[j] || node.ub[j] != base_ub[j];
+            else if (node.lb[j] == node.ub[j])
                 conflict.push_back({int64_t(j), int(node.lb[j])});
         }
-        if (conflict.empty() ||
-            std::find(conflicts.begin(), conflicts.end(), conflict) != conflicts.end())
+        if (conflict.empty())
             return;
+        auto replay_infeasible = [&](const Conflict &clause) {
+            Node probe;
+            probe.lb = base_lb;
+            probe.ub = base_ub;
+            for (auto [j, v] : clause)
+                probe.lb[j] = probe.ub[j] = v;
+            int64_t ignored = 0;
+            return !propagate(original, probe, ignored);
+        };
+        // Nonbinary assumptions cannot enter a binary clause. Learn only if
+        // original-row propagation independently proves the binary subset.
+        if (nonbinary_changes && !replay_infeasible(conflict))
+            return;
+        // Deletion filtering produces a smaller proved clause; limited work
+        // keeps explanation generation inside the solve time budget.
+        int trials = 0;
+        int trial_limit = original.A.value.size() <= 100000 ? 16 : 2;
+        for (size_t i = 0; i < conflict.size() && trials < trial_limit &&
+                           !stop_requested(options) && elapsed(start) < options.time_limit;) {
+            auto reduced = conflict;
+            reduced.erase(reduced.begin() + i);
+            ++trials;
+            if (!reduced.empty() && replay_infeasible(reduced))
+                conflict = std::move(reduced);
+            else
+                ++i;
+        }
+        for (const auto &existing : conflicts)
+            if (std::includes(conflict.begin(), conflict.end(), existing.begin(), existing.end()))
+                return; // Existing clause already excludes this conjunction.
+        conflicts.erase(std::remove_if(conflicts.begin(), conflicts.end(),
+                                       [&](const auto &old) {
+                                           return std::includes(old.begin(), old.end(),
+                                                                conflict.begin(), conflict.end());
+                                       }),
+                        conflicts.end());
         if (conflicts.size() == 128)
             conflicts.erase(conflicts.begin());
         conflicts.push_back(std::move(conflict));

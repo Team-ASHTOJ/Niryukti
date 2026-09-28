@@ -16,3 +16,5 @@ VANTAGE_TEST_BINARY="${1:-build}/vantage" python3 dashboard/tests/test_dashboard
 NIRYUKTI_BINARY="${1:-build}/niryukti" python3 tests/test_service.py
 python3 scripts/check_dependencies.py
 VANTAGE_BINARY="${1:-build}/vantage" NIRYUKTI_LIBRARY="${1:-build}/libniryukti_c.$native_suffix" python3 tests/test_certificates.py
+
+NIRYUKTI_BINARY="${1:-build}/niryukti" python3 tests/test_conflict_learning.py

@@ -55,3 +55,32 @@ there is no claim of commercial-solver completeness or universal speedup.
 For a different NVIDIA laptop use `scripts/validate_cuda_laptop.sh`; the full
 research suite includes the new CUDA regression cases. Final correctness remains
 an original-model check. No new speed ratios are reported without measurements.
+
+
+## Follow-up: persistent propagation and smaller explanations
+
+GPU row/type buffers and scratch storage now persist in a bounded thread-local
+workspace. Node solves upload their current bounds instead of reallocating and
+re-uploading the matrix. Device, fingerprint and exact matrix/row/type data are
+checked before reuse; model changes invalidate the workspace. Multi-device
+switching releases the old allocation on its owning device; actual multi-GPU
+validation remains pending.
+
+Binary explanations are shortened by deletion filtering: each removed literal
+must leave a contradiction independently replayed through original-row bound
+propagation. Nonbinary node assumptions can yield a binary conflict only when
+that binary subset itself replays as infeasible. Subsumed clauses are removed.
+Filtering is limited to 16 trials for small matrices and two for larger matrices,
+with time/cancellation checks, so explanations do not become an unbounded search.
+This remains binary-clause learning, not general dual conflict analysis.
+
+The new independent checkpoint test enumerates an LP-feasible, integer-infeasible
+odd XOR cycle and checks that saved shortened clauses exclude no feasible integer
+assignment. Cache tests check changed node bounds and return to root bounds.
+
+Follow-up validation passed: 15,188 CPU research assertions, 16,381 CUDA research
+assertions on the RTX 4060, all four CTest programs, and the complete CLI, API,
+dashboard, certificate and conflict-checkpoint tests. Logs are retained in
+`results/gpu_conflicts_followup_20260928/`. A changed model releases its old GPU
+workspace before allocating the replacement, avoiding a temporary second full
+copy. These tests establish regression correctness, not a measured speedup.

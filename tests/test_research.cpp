@@ -685,6 +685,16 @@ void completion_regressions() {
                 if (verify(continuous, {x, y}, {0}).primal == 0)
                     require(x >= cl[0] && x <= cu[0] && y >= cl[1] && y <= cu[1],
                             "GPU continuous propagation preserves boundary feasible points");
+        auto narrowed_lower = continuous.lb, narrowed_upper = continuous.ub;
+        narrowed_upper[1] = .5;
+        require(cuda_propagate_integer_bounds(continuous, narrowed_lower, narrowed_upper),
+                "cached GPU propagation accepts changed node bounds");
+        require(narrowed_lower[0] >= 1.49, "cached propagation uploads fresh bounds");
+        auto fresh_lower = continuous.lb, fresh_upper = continuous.ub;
+        require(cuda_propagate_integer_bounds(continuous, fresh_lower, fresh_upper),
+                "cached workspace can restore wider root bounds");
+        near(fresh_lower[0], cl[0], 1e-12);
+        near(fresh_upper[0], cu[0], 1e-12);
         Options presolve_gpu;
         presolve_gpu.device = "cuda";
         presolve_gpu.gpu_presolve = true;

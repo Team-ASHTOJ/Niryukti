@@ -965,14 +965,64 @@ bool cuda_propagate_integer_bounds(const Model &m, std::vector<double> &lb, std:
             throw std::runtime_error("Invalid GPU propagation bounds");
     if (m.A.rows == 0 || passes == 0)
         return true;
-    std::vector<int> types;
-    for (auto t : m.types)
-        types.push_back(t != VarType::Continuous);
-    Stream stream;
-    Buffer<int64_t> ptr(m.A.ptr), index(m.A.index);
-    Buffer<double> coefficients(m.A.value), old_lb(lb), old_ub(ub), new_lb(lb), new_ub(ub),
-        rl(m.rl), ru(m.ru);
-    Buffer<int> integer(types), failed(1);
+    // One bounded workspace per thread/device/model: node changes upload only
+    // their bound vectors, retaining immutable matrix, rows and type arrays.
+    struct PropagationWorkspace {
+        std::string fingerprint;
+        Sparse host_matrix;
+        std::vector<double> host_lower, host_upper;
+        std::vector<VarType> host_types;
+        int device;
+        Stream stream;
+        Buffer<int64_t> ptr, index;
+        Buffer<double> coefficients, old_lb, old_ub, new_lb, new_ub, rl, ru;
+        Buffer<int> integer, failed;
+        PropagationWorkspace(const Model &model, std::string key, int id,
+                             const std::vector<int> &types)
+            : fingerprint(std::move(key)), host_matrix(model.A), host_lower(model.rl),
+              host_upper(model.ru), host_types(model.types), device(id), ptr(model.A.ptr),
+              index(model.A.index), coefficients(model.A.value), old_lb(model.c.size()),
+              old_ub(model.c.size()), new_lb(model.c.size()), new_ub(model.c.size()), rl(model.rl),
+              ru(model.ru), integer(types), failed(1) {}
+    };
+    static thread_local std::unique_ptr<PropagationWorkspace> cached;
+    int device = 0;
+    check(cudaGetDevice(&device), "propagation device");
+    if (cached && cached->device != device) {
+        check(cudaSetDevice(cached->device), "release previous propagation device");
+        cached.reset();
+        check(cudaSetDevice(device), "restore propagation device");
+    }
+    auto fingerprint = m.fingerprint();
+    if (!cached || cached->device != device || cached->fingerprint != fingerprint ||
+        cached->host_matrix.rows != m.A.rows || cached->host_matrix.cols != m.A.cols ||
+        cached->host_matrix.ptr != m.A.ptr || cached->host_matrix.index != m.A.index ||
+        cached->host_matrix.value != m.A.value || cached->host_lower != m.rl ||
+        cached->host_upper != m.ru || cached->host_types != m.types) {
+        std::vector<int> types;
+        for (auto t : m.types)
+            types.push_back(t != VarType::Continuous);
+        // Free the old workspace first: replacing a large model must not need
+        // two complete device copies at once. Previous calls are synchronized.
+        cached.reset();
+        cached = std::make_unique<PropagationWorkspace>(m, fingerprint, device, types);
+    }
+    auto &stream = cached->stream;
+    auto &ptr = cached->ptr;
+    auto &index = cached->index;
+    auto &coefficients = cached->coefficients;
+    auto &old_lb = cached->old_lb;
+    auto &old_ub = cached->old_ub;
+    auto &new_lb = cached->new_lb;
+    auto &new_ub = cached->new_ub;
+    auto &rl = cached->rl;
+    auto &ru = cached->ru;
+    auto &integer = cached->integer;
+    auto &failed = cached->failed;
+    old_lb.upload(lb);
+    old_ub.upload(ub);
+    new_lb.upload(lb);
+    new_ub.upload(ub);
     failed.zero();
     for (int pass = 0; pass < passes; ++pass) {
         propagate_rows<<<(m.A.rows + 255) / 256, 256, 0, stream.value>>>(
