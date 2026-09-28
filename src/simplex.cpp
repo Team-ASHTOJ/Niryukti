@@ -1,3 +1,4 @@
+#include "checkpoint.hpp"
 #include "internal.hpp"
 #include <cstring>
 #include <numeric>
@@ -224,7 +225,8 @@ Standard standardize(const Model &m) {
 int64_t simplex_row_limit() {
     return basis_row_limit();
 }
-static Result solve_simplex_raw(const Model &m, const Options &o) {
+static Result solve_simplex_raw(const Model &m, const Options &o,
+                                const std::string &root_fingerprint = "") {
     auto start = Clock::now();
     Result r;
     struct Timer {
@@ -298,11 +300,51 @@ static Result solve_simplex_raw(const Model &m, const Options &o) {
         if (warm_basis)
             s.basis.assign(o.initial_basis.begin(), o.initial_basis.end());
     }
+    int resume_phase = 1, active_phase = 1, degenerate_pivots = 0;
+    const auto original_fingerprint = root_fingerprint.empty() ? m.fingerprint() : root_fingerprint;
+    bool resumed = !o.resume_path.empty();
+    if (resumed) {
+        auto saved =
+            read_engine_checkpoint(o.resume_path, "niryukti-simplex-1", original_fingerprint, o);
+        if (saved.at("basis_fingerprint") != r.basis_fingerprint ||
+            saved.at("prepared_fingerprint") != m.fingerprint())
+            throw std::runtime_error("Simplex checkpoint transformed model mismatch");
+        auto basis = saved.at("basis").get<std::vector<int>>();
+        if (basis.size() != size_t(rows))
+            throw std::runtime_error("Simplex checkpoint basis dimensions");
+        std::vector<bool> seen(cols);
+        for (auto j : basis) {
+            if (j < 0 || j >= cols || seen[j])
+                throw std::runtime_error("Invalid simplex checkpoint basis");
+            seen[j] = true;
+        }
+        resume_phase = saved.at("phase").get<int>();
+        degenerate_pivots = saved.at("degenerate_pivots").get<int>();
+        if (resume_phase < 0 || resume_phase > 2 || degenerate_pivots < 0)
+            throw std::runtime_error("Invalid simplex checkpoint phase");
+        active_phase = resume_phase;
+        r.iterations = saved.at("iterations");
+        s.basis = std::move(basis);
+        warm_basis = resume_phase == 0;
+    }
+    auto save_state = [&]() {
+        write_engine_checkpoint(o.checkpoint_path, {{"schema", "niryukti-simplex-1"},
+                                                    {"fingerprint", original_fingerprint},
+                                                    {"prepared_fingerprint", m.fingerprint()},
+                                                    {"configuration", checkpoint_configuration(o)},
+                                                    {"basis_fingerprint", r.basis_fingerprint},
+                                                    {"basis", s.basis},
+                                                    {"phase", active_phase},
+                                                    {"degenerate_pivots", degenerate_pivots},
+                                                    {"iterations", r.iterations}});
+    };
     Factor factor(rows);
-    if (warm_basis) {
+    if (warm_basis || resumed) {
         try {
             factor.factor(s.columns, s.basis);
         } catch (const std::exception &) {
+            if (resumed)
+                throw;
             s = standardize(m);
             warm_basis = false;
         }
@@ -335,6 +377,7 @@ static Result solve_simplex_raw(const Model &m, const Options &o) {
     for (auto j : s.basis)
         basic[j] = true;
     auto checkpoint = [&]() {
+        save_state();
         r.basis.assign(s.basis.begin(), s.basis.end());
         r.x = s.shift;
         r.y.assign(m.rl.size(), 0);
@@ -370,6 +413,7 @@ static Result solve_simplex_raw(const Model &m, const Options &o) {
     };
     try {
         if (warm_basis) {
+            active_phase = 0;
             // A saved optimal basis remains dual feasible under RHS/bound changes.
             // Repair negative basic values with revised dual pivots; cost changes
             // that break dual feasibility restart the independent primal phases.
@@ -395,6 +439,8 @@ static Result solve_simplex_raw(const Model &m, const Options &o) {
                 r.message =
                     "Explicit compatible basis; revised dual ratio tests and product-form updates";
                 while (true) {
+                    if (r.iterations % o.checkpoint_nodes == 0)
+                        save_state();
                     if (stop_requested(o) || elapsed(start) >= o.time_limit ||
                         r.iterations >= o.iteration_limit) {
                         r.status = stop_requested(o)                ? "INTERRUPTED"
@@ -467,13 +513,17 @@ static Result solve_simplex_raw(const Model &m, const Options &o) {
         if (o.method == "dual-simplex")
             r.message =
                 "Dual simplex cold start uses independent primal two-phase basis initialization";
-        for (int phase = 1; phase <= 2; ++phase) {
+        for (int phase = std::max(1, resume_phase); phase <= 2; ++phase) {
+            active_phase = phase;
             std::vector<double> cost = s.c;
             if (phase == 1)
                 for (int j = 0; j < cols; ++j)
                     cost[j] = s.artificial[j] ? 1 : 0;
-            int degenerate_pivots = 0;
+            if (!resumed || phase != resume_phase)
+                degenerate_pivots = 0;
             while (true) {
+                if (r.iterations % o.checkpoint_nodes == 0)
+                    save_state();
                 if (stop_requested(o)) {
                     r.status = "INTERRUPTED";
                     checkpoint();
@@ -633,7 +683,7 @@ Result solve_simplex(const Model &original, const Options &o) {
     }
     auto options = o;
     options.time_limit = std::max(0., o.time_limit - preprocess_seconds);
-    auto r = solve_simplex_raw(p.model, options);
+    auto r = solve_simplex_raw(p.model, options, original.fingerprint());
     r.preprocess_seconds += preprocess_seconds;
     r.removed_columns = original.c.size() - p.model.c.size();
     r.removed_rows = original.rl.size() - p.model.rl.size();

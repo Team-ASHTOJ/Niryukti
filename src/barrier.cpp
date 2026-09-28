@@ -1,3 +1,4 @@
+#include "checkpoint.hpp"
 #include "internal.hpp"
 #include <iostream>
 #include <stdexcept>
@@ -120,6 +121,48 @@ Result solve_barrier(const Model &original, const Options &o) {
             x[j] = std::clamp(x[j], m.lb[j], m.ub[j]);
     }
     Vector slack = (bound - g * x).cwiseMax(1.);
+    if (!o.resume_path.empty()) {
+        auto saved =
+            read_engine_checkpoint(o.resume_path, "niryukti-barrier-1", original.fingerprint(), o);
+        auto restore = [&](const char *name, Vector &target, bool positive) {
+            auto values = saved.at(name).get<std::vector<double>>();
+            if (values.size() != size_t(target.size()))
+                throw std::runtime_error("Barrier checkpoint dimensions");
+            for (auto v : values)
+                if (!std::isfinite(v) || (positive && !(v > 0)))
+                    throw std::runtime_error("Invalid barrier checkpoint vector");
+            target = Eigen::Map<Vector>(values.data(), values.size());
+        };
+        restore("x", x, false);
+        restore("y", y, false);
+        restore("z", z, true);
+        restore("slack", slack, true);
+        result.iterations = saved.at("iterations");
+        result.x = saved.at("best_x").get<std::vector<double>>();
+        result.y = saved.at("best_y").get<std::vector<double>>();
+        if (!result.x.empty() || !result.y.empty()) {
+            if (result.x.size() != original.c.size() || result.y.size() != original.rl.size())
+                throw std::runtime_error("Barrier checkpoint best-candidate dimensions");
+            result.accuracy = verify(original, result.x, result.y);
+            if (!result.accuracy.finite)
+                throw std::runtime_error("Invalid barrier checkpoint candidate");
+        }
+    }
+    auto save = [&]() {
+        auto values = [](const Vector &v) {
+            return std::vector<double>(v.data(), v.data() + v.size());
+        };
+        write_engine_checkpoint(o.checkpoint_path, {{"schema", "niryukti-barrier-1"},
+                                                    {"fingerprint", original.fingerprint()},
+                                                    {"configuration", checkpoint_configuration(o)},
+                                                    {"iterations", result.iterations},
+                                                    {"best_x", result.x},
+                                                    {"best_y", result.y},
+                                                    {"x", values(x)},
+                                                    {"y", values(y)},
+                                                    {"z", values(z)},
+                                                    {"slack", values(slack)}});
+    };
     auto candidate = [&]() {
         std::vector<double> dual(m.rl.size(), 0);
         for (int i = 0; i < equalities; ++i)
@@ -147,7 +190,9 @@ Result solve_barrier(const Model &original, const Options &o) {
     };
     result.status = "ITERATION_LIMIT";
     try {
-        for (int64_t iteration = 0; iteration <= o.iteration_limit; ++iteration) {
+        for (int64_t iteration = result.iterations; iteration <= o.iteration_limit; ++iteration) {
+            if (iteration % o.checkpoint_nodes == 0)
+                save();
             if (candidate()) {
                 result.status = "OPTIMAL";
                 break;
@@ -259,6 +304,7 @@ Result solve_barrier(const Model &original, const Options &o) {
         result.status = "NUMERICAL_ERROR";
         result.message = error.what();
     }
+    save();
     result.iteration_seconds = std::max(0., elapsed(start) - result.preprocess_seconds);
     result.seconds = elapsed(start);
     return result;

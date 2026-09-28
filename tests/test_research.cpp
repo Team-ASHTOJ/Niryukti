@@ -1147,6 +1147,25 @@ void mip_research() {
             near(r.accuracy.objective, -2, 1e-5);
     }
 }
+void singular_sparse_ordering() {
+    // Q = sum_j (e_0 - 2 e_j)(e_0 - 2 e_j)^T is exactly PSD and singular.
+    // Natural-order elimination fills a dense leaf clique; AMD avoids that fill.
+    constexpr int n = 1200;
+    auto m = model(n, 0, {});
+    std::vector<Entry> entries{{0, 0, n - 1.}};
+    for (int j = 1; j < n; ++j) {
+        entries.push_back({0,j,-2}); entries.push_back({j,0,-2});
+        entries.push_back({j,j,4});
+    }
+    m.Q = Sparse::build(n,n,entries);
+    m.validate();
+    require(true, "large singular weighted-star PSD validated without dense fill");
+    entries.back().value = 3;
+    m.Q = Sparse::build(n,n,entries);
+    bool rejected = false;
+    try { m.validate(); } catch (const std::exception &) { rejected = true; }
+    require(rejected, "negative curvature remains rejected after sparse reordering");
+}
 } // namespace
 int main() {
     try {
@@ -1154,6 +1173,7 @@ int main() {
         halpern();
         gpu_execution();
         sparse_quadratic();
+        singular_sparse_ordering();
         quadratic_extensions();
         sparse_qp_recession_guard();
         binary_conflict_propagation();

@@ -36,3 +36,5 @@ python3 scripts/check_dependencies.py
 VANTAGE_BINARY="${1:-build}/vantage" NIRYUKTI_LIBRARY="${1:-build}/libniryukti_c.$native_suffix" native_python tests/test_certificates.py
 
 NIRYUKTI_BINARY="${1:-build}/niryukti" python3 tests/test_conflict_learning.py
+
+NIRYUKTI_BINARY="${1:-build}/niryukti" python3 tests/test_engine_checkpoints.py

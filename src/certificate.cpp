@@ -192,7 +192,7 @@ std::string certificate_json(const Model &m, const Result &r, const Options &o) 
     J c = {
         {"certificate_schema_version", "1.0"},
         {"solver", "NIRYUKTI"},
-        {"solver_version", "0.2.0"},
+        {"solver_version", NIRYUKTI_VERSION},
         {"model_fingerprint", certificate_fingerprint(m)},
         {"dimensions",
          {{"variables", m.c.size()}, {"constraints", m.rl.size()}, {"nonzeros", m.A.value.size()}}},

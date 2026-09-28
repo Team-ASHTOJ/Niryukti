@@ -172,16 +172,26 @@ void Model::validate() const {
                     // Independent sparse semidefinite elimination. A zero pivot is
                     // admissible only when its entire remaining row is exactly zero;
                     // no negative curvature is hidden by a regularizing shift.
+                    // Reorder the sparse graph before semidefinite elimination.
+                    // Eliminating a hub first can create quadratic fill even for a
+                    // sparse, singular weighted-star Gram matrix. AMD changes only
+                    // the elimination order, never the objective or curvature test.
+                    Eigen::AMDOrdering<int> ordering;
+                    Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic, int> permutation;
+                    ordering(h, permutation);
+                    Matrix reordered = permutation.transpose() * h * permutation;
                     std::vector<std::map<int, long double>> upper(n);
                     size_t stored = n, operations = 0;
-                    for (size_t i = 0; i < n; ++i) {
-                        upper[i][int(i)] = q[i];
-                        for (auto k = Q.ptr[i]; k < Q.ptr[i + 1]; ++k)
-                            if (Q.index[k] >= int64_t(i)) {
-                                upper[i][int(Q.index[k])] += Q.value[k];
-                                ++stored;
+                    for (size_t i = 0; i < n; ++i)
+                        upper[i][int(i)] = 0;
+                    for (int col = 0; col < reordered.outerSize(); ++col)
+                        for (Matrix::InnerIterator entry(reordered, col); entry; ++entry)
+                            if (entry.col() >= entry.row()) {
+                                auto inserted = upper[entry.row()].try_emplace(entry.col(), 0);
+                                if (inserted.second)
+                                    ++stored;
+                                inserted.first->second += entry.value();
                             }
-                    }
                     for (size_t k = 0; k < n; ++k) {
                         long double pivot = upper[k][int(k)];
                         if (!std::isfinite(pivot) || pivot < 0)

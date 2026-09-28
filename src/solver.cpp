@@ -1,3 +1,4 @@
+#include "checkpoint.hpp"
 #include "internal.hpp"
 #include "json.hpp"
 #include <filesystem>
@@ -61,9 +62,6 @@ Result solve(const Model &m, const Options &o) {
             "Batched strong branching requires CUDA MILP and reliability branching");
     if (o.checkpoint_nodes < 1)
         throw std::runtime_error("Checkpoint node interval must be positive");
-    if ((!o.checkpoint_path.empty() || !o.resume_path.empty()) && !m.is_mip() &&
-        o.method != "auto" && o.method != "pdhg" && !anchored_method(o))
-        throw std::runtime_error("Continuous checkpoint/resume requires a first-order method");
     if (gpu_request(o) && o.device != gpu_backend_name()) {
         Result r;
         r.status = "UNSUPPORTED";
@@ -107,6 +105,22 @@ Result solve_continuous(const Model &original, const Options &o) {
     if (anchored_method(o) && (o.adaptive || original.is_qp() || original.is_mip()))
         throw std::runtime_error("Experimental Halpern supports continuous LP with --no-adaptive");
     if (o.method == "auto") {
+        if (!o.resume_path.empty()) {
+            std::ifstream file(o.resume_path);
+            if (!file)
+                throw std::runtime_error("Cannot open solver checkpoint");
+            CheckpointJson saved;
+            file >> saved;
+            auto schema = saved.at("schema").get<std::string>();
+            if (schema == "niryukti-barrier-1" || schema == "niryukti-simplex-1" ||
+                schema == "niryukti-portfolio-1") {
+                Options selected = o;
+                selected.method = schema == "niryukti-barrier-1"   ? "barrier"
+                                  : schema == "niryukti-simplex-1" ? "simplex"
+                                                                   : "concurrent";
+                return solve_continuous(original, selected);
+            }
+        }
         auto start = Clock::now();
         auto advice =
             advise_model(original, o,

@@ -132,6 +132,16 @@ std::vector<double> Prepared::restore_y(const std::vector<double> &y, size_t n) 
 }
 Prepared prepare(const Model &src, const Options &o) {
     Prepared p;
+    auto start = Clock::now();
+    auto stopped = [&]() {
+        if (!stop_requested(o) && elapsed(start) < o.time_limit)
+            return false;
+        p.failure = stop_requested(o) ? "INTERRUPTED" : "TIME_LIMIT";
+        p.reason = "Stopped during presolve/scaling before iteration work";
+        return true;
+    };
+    if (stopped())
+        return p;
     p.fixed.assign(src.c.size(), 0);
     Model &m = p.model;
     m.name = src.name;
@@ -147,6 +157,8 @@ Prepared prepare(const Model &src, const Options &o) {
         if (src.Q.ptr[i] != src.Q.ptr[i + 1])
             used[i] = true;
     for (size_t j = 0; j < src.c.size(); j++) {
+        if ((j & 1023) == 0 && stopped())
+            return p;
         double chosen = src.lb[j];
         bool removable = src.lb[j] == src.ub[j];
         if (!used[j]) {
@@ -186,6 +198,8 @@ Prepared prepare(const Model &src, const Options &o) {
     std::vector<Entry> e;
     std::map<std::vector<std::pair<int64_t, double>>, size_t> duplicate_rows;
     for (size_t i = 0; i < src.rl.size(); i++) {
+        if ((i & 1023) == 0 && stopped())
+            return p;
         long double shift = 0, shift_magnitude = 0;
         int64_t count = 0;
         for (auto k = src.A.ptr[i]; k < src.A.ptr[i + 1]; k++) {
@@ -284,6 +298,8 @@ Prepared prepare(const Model &src, const Options &o) {
         geometric_scale(p);
     // Ruiz infinity-norm equilibration, x_original = D_c x_scaled.
     for (int pass = 0; pass < o.scaling_passes; pass++) {
+        if (stopped())
+            return p;
         std::vector<double> row(m.rl.size(), 1), col(m.c.size(), 1);
         for (size_t i = 0; i < row.size(); ++i) {
             double norm = 0;

@@ -1,3 +1,4 @@
+#include "checkpoint.hpp"
 #include "internal.hpp"
 #include <future>
 #include <thread>
@@ -13,11 +14,51 @@ Result solve_portfolio(const Model &model, const Options &options) {
     if (!model.is_qp())
         methods.push_back("simplex");
     methods.resize(std::min<size_t>(methods.size(), std::max(1, options.threads)));
+    CheckpointJson previous;
+    if (!options.resume_path.empty()) {
+        previous = read_engine_checkpoint(options.resume_path, "niryukti-portfolio-1",
+                                          model.fingerprint(), options);
+        if (previous.at("methods") != methods || previous.at("threads") != options.threads)
+            throw std::runtime_error("Portfolio checkpoint engine/thread configuration mismatch");
+    }
+    std::vector<std::string> children;
+    for (const auto &method : methods) {
+        if (!options.checkpoint_path.empty())
+            children.push_back(
+                std::filesystem::absolute(options.checkpoint_path + "." + method + ".json")
+                    .string());
+    }
+    if (!options.checkpoint_path.empty())
+        write_engine_checkpoint(options.checkpoint_path,
+                                {{"schema", "niryukti-portfolio-1"},
+                                 {"fingerprint", model.fingerprint()},
+                                 {"configuration", checkpoint_configuration(options)},
+                                 {"iterations", 0},
+                                 {"methods", methods},
+                                 {"threads", options.threads},
+                                 {"children", [&]() {
+                                      std::vector<std::string> names;
+                                      for (const auto &child : children)
+                                          names.push_back(
+                                              std::filesystem::path(child).filename().string());
+                                      return names;
+                                  }()}});
     for (size_t index = 0; index < methods.size(); ++index) {
         const auto &method = methods[index];
         Options o = options;
         o.method = method;
         o.cancellation = cancellation;
+        o.checkpoint_path = children.empty() ? "" : children[index];
+        if (!options.resume_path.empty()) {
+            auto paths = previous.at("children").get<std::vector<std::string>>();
+            if (paths.size() != methods.size())
+                throw std::runtime_error("Portfolio checkpoint child dimensions");
+            auto child_path =
+                std::filesystem::path(options.resume_path).parent_path() / paths[index];
+            if (!std::filesystem::is_regular_file(child_path))
+                throw std::runtime_error("Portfolio checkpoint child state missing");
+            o.resume_path = child_path.string();
+        }
         if (o.method != "pdhg") {
             o.device = "cpu";
             o.cuda_graphs = false;

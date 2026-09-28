@@ -903,7 +903,7 @@ std::string result_json(const Model &m, const Result &r) {
     auto a = r.accuracy;
     json j = {
         {"solver", "NIRYUKTI"},
-        {"version", "0.2.0"},
+        {"version", NIRYUKTI_VERSION},
         {"status", r.status},
         {"message", r.message},
         {"problem_type", m.is_mip()  ? (m.is_qp() ? "MIQP" : "MILP")

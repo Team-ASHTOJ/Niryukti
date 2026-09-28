@@ -1,3 +1,7 @@
+# Follow-up status
+
+The frozen campaign and published 0.2.1 packages are recorded in [release evidence](release_0_2_1_campaign.md). New source checkpoint, sparse-PSD, cancellation and video-demo work is recorded in [local completion](local_completion_20260928.md). The assessment below records the earlier audit; use those follow-ups for current completion status.
+
 # Prototype readiness audit — 28 September 2026
 
 ## Latest changes reviewed
@@ -69,8 +73,8 @@ remains active there.
   performance; current supported sparse convex classes are guarded.
 - Direct GPU sparse barrier factorization and high-accuracy robustness. Current
   barrier is experimental and has size/fill guards and CPU KKT assembly.
-- Checkpoint state for simplex/barrier/concurrent engines. MIP tree and first-order
-  state saving do not imply that every algorithm supports exact resume.
+- Simplex/barrier/concurrent state saving is now implemented and tested in the
+  follow-up source pass. Refactorization and portfolio race ordering are not bitwise replay.
 - Strict cancellation/time budgeting inside every preprocessing/factorization
   operation. Individual synchronous operations can exceed a soft solver budget.
 - Broad external benchmarking, calibration of auto thresholds, and measured
