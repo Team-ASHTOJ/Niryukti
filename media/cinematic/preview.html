@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niryukti — Cinematic preview</title>
+<style>
+@font-face{font-family:Sora;src:url('../../dashboard/static/fonts/Sora-Variable.ttf')}
+*{box-sizing:border-box}body{margin:0;background:#0d0e10;color:#ece9e3;font-family:Sora,system-ui,sans-serif}main{max-width:1280px;margin:auto;padding:48px 28px}header{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:28px}h1{font-size:26px;font-weight:500;letter-spacing:.12em;margin:0}p{color:#94918b;font-size:13px;line-height:1.7}small{color:#cfac74;letter-spacing:.18em}video{display:block;width:100%;background:#08090a;border:1px solid #35373c;border-radius:12px}nav{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0}button,a{border:1px solid #35373c;background:#15171a;color:#ece9e3;padding:12px 17px;font:12px Sora,system-ui;cursor:pointer;border-radius:6px;text-decoration:none}button[aria-pressed=true]{color:#141416;background:#cfac74;border-color:#cfac74}button:hover,a:hover{border-color:#cfac74}section{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0}footer{border-top:1px solid #25272b;padding-top:20px;margin-top:30px}img{width:100%;height:auto;border-radius:8px}details{margin-top:24px}summary{cursor:pointer;color:#cfac74;font-size:13px;margin-bottom:18px}:focus-visible{outline:2px solid #cfac74;outline-offset:4px}@media(max-width:600px){main{padding:26px 16px}header{display:block}h1{font-size:23px}small{display:block;margin-top:12px}}
+</style>
+<main>
+<header><div><h1>NIRYUKTI</h1><p>Cinematic opening & closing · Team Ashtoj</p></div><small>1080P / 60 FPS / SILENT</small></header>
+<video id="film" controls playsinline preload="metadata" poster="intro-18.6-preview.png" src="niryukti-intro-1080p.mp4"></video>
+<nav aria-label="Choose video"><button id="intro" aria-pressed="true">Opening · 24 seconds</button><button id="outro" aria-pressed="false">Closing · 12 seconds</button><a id="download" href="niryukti-intro-1080p.mp4" download>Download MP4</a><a href="README.md">Editing & voiceover guide</a></nav>
+<section id="chapters" aria-label="Opening scenes"></section>
+<p id="note">Separate team, Presents and Niryukti scenes. Add your own narration and music in your editor.</p>
+<details><summary>View the storyboard</summary><img src="storyboard.jpg" alt="Ten frames showing the geometric opening, team card, Presents scene, particle mark assembly, project title and outro."></details>
+<footer><p>Graphite, ivory & champagne gold. Procedural geometry, moving light trails and kinetic typography. The visuals are editorial artwork, not solver telemetry.</p></footer>
+</main>
+<script>
+const film=document.querySelector('#film');
+const timings={intro:[['Opening hook',0],['Team Ashtoj',4.8],['Presents',10.1],['Mark assembly',13.1],['Niryukti',16.7],['Transition',22.5]],outro:[['Logo reveal',0],['Closing message',2.5],['Team credit',4.1],['Try Niryukti',6.5]]};
+function setVideo(kind){
+ film.pause();film.src=`niryukti-${kind}-1080p.mp4`;film.poster=kind==='intro'?'intro-18.6-preview.png':'outro-9-preview.png';film.load();
+ for(const k of ['intro','outro'])document.querySelector('#'+k).setAttribute('aria-pressed',String(k===kind));
+ document.querySelector('#download').href=film.getAttribute('src');
+ const chapters=document.querySelector('#chapters');chapters.replaceChildren();
+ for(const [label,time] of timings[kind]){const button=document.createElement('button');button.textContent=label;button.onclick=()=>{film.currentTime=time;film.play().catch(()=>{});};chapters.append(button);}
+}
+document.querySelector('#intro').onclick=()=>setVideo('intro');document.querySelector('#outro').onclick=()=>setVideo('outro');setVideo('intro');
+</script>
+</html>

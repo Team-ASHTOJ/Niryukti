@@ -687,4 +687,4 @@ or use it as a 45-second research-context insert.
 
 ## Ready-made cinematic opening and closing
 
-The [cinematic asset guide](../media/cinematic/README.md) includes a 12-second opening, an 8-second closing, exact voiceover timing, editing instructions and editable rendering source. Use these around the dashboard demonstration; both are silent so narration and music can remain under your control.
+The [cinematic asset guide](../media/cinematic/README.md) includes a 24-second animated opening, a 12-second closing, exact voiceover timing, editing instructions and editable rendering source. Use these around the dashboard demonstration; both are silent so narration and music can remain under your control.
