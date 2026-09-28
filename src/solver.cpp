@@ -220,6 +220,8 @@ Result solve_continuous(const Model &original, const Options &o) {
     Verifier verifier(original);
     r.status = "ITERATION_LIMIT";
     std::vector<double> propagated_lower, propagated_upper;
+    BoundPostsolve bound_postsolve;
+    Model reduced = original;
     if (o.gpu_presolve) {
         propagated_lower = original.lb;
         propagated_upper = original.ub;
@@ -227,10 +229,14 @@ Result solve_continuous(const Model &original, const Options &o) {
             propagated_lower.clear();
             propagated_upper.clear();
         }
-        // Continuous bound changes require dual postsolve provenance. Until that
-        // exists, use them only to initialize x, preserving the original dual box.
+        // GPU proposals become actual reductions only after outward-rounded
+        // derivation replay, retaining a dual substitution DAG for postsolve.
+        bound_postsolve = prove_gpu_bounds(original, propagated_lower, propagated_upper, o);
+        reduced.lb = bound_postsolve.lower;
+        reduced.ub = bound_postsolve.upper;
+        r.bounds_tightened = bound_postsolve.derivations.size();
     }
-    auto prep = prepare(original, o);
+    auto prep = prepare(reduced, o);
     r.preprocess_seconds = elapsed(start);
     if (!prep.failure.empty()) {
         r.status = prep.failure;
@@ -256,7 +262,7 @@ Result solve_continuous(const Model &original, const Options &o) {
         if (!o.initial_y.empty())
             y[i] = o.initial_y[prep.rows[i]] / (prep.row_scale[i] * prep.objective_scale);
     r.x = prep.restore_x(x);
-    r.y = prep.restore_y(y, original.rl.size());
+    r.y = bound_postsolve.lift_dual(original, r.x, prep.restore_y(y, original.rl.size()));
     r.accuracy = verifier.evaluate(r.x, r.y);
     // Direct recession certificate for isolated linear columns, plus a checked feasible point.
     if (r.accuracy.finite && r.accuracy.primal_absolute == 0) {
@@ -548,9 +554,11 @@ Result solve_continuous(const Model &original, const Options &o) {
             restart_x = ax;
             restart_y = ay;
         }
-        auto ox = prep.restore_x(cx), oy = prep.restore_y(cy, original.rl.size());
+        auto ox = prep.restore_x(cx);
+        auto oy = bound_postsolve.lift_dual(original, ox, prep.restore_y(cy, original.rl.size()));
         auto ca = verifier.evaluate(ox, oy, false);
-        auto aox = prep.restore_x(ax), aoy = prep.restore_y(ay, original.rl.size());
+        auto aox = prep.restore_x(ax);
+        auto aoy = bound_postsolve.lift_dual(original, aox, prep.restore_y(ay, original.rl.size()));
         auto aa = verifier.evaluate(aox, aoy, false);
         bool avg = aa.kkt < ca.kkt;
         if (avg) {
@@ -596,7 +604,8 @@ Result solve_continuous(const Model &original, const Options &o) {
             std::vector<std::vector<double>> rays;
             rays.push_back(oy);
             rays.push_back(aoy);
-            rays.push_back(prep.restore_y(displacement, original.rl.size()));
+            rays.push_back(bound_postsolve.lift_dual(
+                original, ox, prep.restore_y(displacement, original.rl.size()), false));
             for (auto &ray : rays) {
                 double norm_y = 0;
                 bool finite = true;

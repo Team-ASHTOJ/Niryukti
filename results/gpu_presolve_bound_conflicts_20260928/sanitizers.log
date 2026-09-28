@@ -1,0 +1,18 @@
+Test project /tmp/niryukti-final-sanitize
+    Start 1: core
+1/4 Test #1: core .............................   Passed    0.51 sec
+    Start 2: advisor
+2/4 Test #2: advisor ..........................   Passed    0.10 sec
+    Start 3: research
+3/4 Test #3: research .........................   Passed    2.16 sec
+    Start 4: certificates
+4/4 Test #4: certificates .....................   Passed    0.28 sec
+
+100% tests passed out of 4
+
+Total Test time (real) =   3.05 sec
+..
+----------------------------------------------------------------------
+Ran 2 tests in 0.307s
+
+OK

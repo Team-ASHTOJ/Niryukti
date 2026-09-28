@@ -17,7 +17,7 @@ for model in refinery coupled_dispatch supply_chain scheduling; do
 done
 # Demonstrate the actual GPU path explicitly; auto intentionally chooses CPU for tiny models.
 if grep -q '^CUDA: NVIDIA' "$OUTPUT/devices.json"; then
-  "$BINARY" solve examples/refinery.json --method pdhg --device cuda --cuda-graphs --gpu-monitor --iterations 1000000 --time-limit 30 --json-out "$OUTPUT/refinery-cuda.json"
+  "$BINARY" solve examples/refinery.json --method pdhg --device cuda --cuda-graphs --gpu-monitor --gpu-presolve --iterations 1000000 --time-limit 30 --json-out "$OUTPUT/refinery-cuda.json"
   "$BINARY" verify examples/refinery.json "$OUTPUT/refinery-cuda.json" > "$OUTPUT/refinery-cuda-verification.json"
 fi
 # Demonstrate real Newton-state continuation, not a fresh solve renamed as resume.

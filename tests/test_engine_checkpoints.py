@@ -19,6 +19,34 @@ class EngineCheckpointTests(unittest.TestCase):
         self.assertIn(p.returncode, (0, 2), p.stderr)
         return json.loads(p.stdout)
 
+    def test_gpu_presolve_checkpoint_dual_reconstruction(self):
+        devices = subprocess.check_output([BINARY, 'devices'], text=True)
+        if 'CUDA: NVIDIA' not in devices:
+            self.skipTest('CUDA hardware/backend unavailable')
+        with tempfile.TemporaryDirectory() as folder:
+            model = Path(folder)/'model.json'; checkpoint = Path(folder)/'state.json'
+            model.write_text(json.dumps({
+                'variables': [{'name': n, 'lb': 0, 'ub': 10} for n in 'xzw'],
+                'objective': {'linear': [1, -.1, 2]},
+                'constraints': [
+                    {'name': 'blend', 'coefficients': {'x': 1, 'z': 1}, 'lb': 6},
+                    {'name': 'limit', 'coefficients': {'z': 1}, 'ub': 3},
+                    {'name': 'demand', 'coefficients': {'x': 1, 'w': 1}, 'lb': 8}]}))
+            command = [BINARY, 'solve', str(model), '--device', 'cuda', '--method', 'pdhg',
+                       '--gpu-presolve', '--gpu-monitor', '--cuda-graphs', '--check-every', '1',
+                       '--time-limit', '20', '--checkpoint-out', str(checkpoint), '--checkpoint-nodes', '1']
+            first = subprocess.run(command + ['--iterations', '1'], capture_output=True, text=True, timeout=30)
+            self.assertIn(first.returncode, (0, 2), first.stderr)
+            self.assertTrue(checkpoint.is_file())
+            resumed = subprocess.run(command + ['--iterations', '100000', '--resume', str(checkpoint)],
+                                     capture_output=True, text=True, timeout=30)
+            self.assertIn(resumed.returncode, (0, 2), resumed.stderr)
+            result = json.loads(resumed.stdout)
+            self.assertEqual(result['status'], 'OPTIMAL', result.get('message'))
+            self.assertGreater(result['presolve']['bounds_tightened'], 0)
+            self.assertLessEqual(result['accuracy']['kkt_error'], 1e-6)
+            self.assertAlmostEqual(result['objective'], 7.7, places=4)
+
     def test_actual_solver_sigint(self):
         with tempfile.TemporaryDirectory() as folder:
             log = Path(folder)/'iterations.log'

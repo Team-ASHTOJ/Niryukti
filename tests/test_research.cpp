@@ -272,6 +272,32 @@ void binary_conflict_propagation() {
     ub = {1, 1, 1};
     require(!propagate_binary_conflicts(clauses, lb, ub, changes), "conflict contradiction");
 }
+void general_bound_conflict_propagation() {
+    std::vector<std::vector<BoundLiteral>> clauses = {{{0, true, 3}, {1, false, 2}},
+                                                      {{1, true, 3}, {2, true, 4}}};
+    std::vector<VarType> types(3, VarType::Integer);
+    std::vector<double> lb = {3, 0, 0}, ub = {5, 5, 5};
+    int64_t changes = 0;
+    require(propagate_bound_conflicts(clauses, types, lb, ub, changes),
+            "integer bound clauses propagate");
+    require(lb[1] == 3 && ub[2] == 3, "general integer conflict cascade");
+    for (int x = 3; x <= 5; ++x)
+        for (int y = 0; y <= 5; ++y)
+            for (int z = 0; z <= 5; ++z)
+                if (!(x >= 3 && y <= 2) && !(y >= 3 && z >= 4))
+                    require(y >= lb[1] && y <= ub[1] && z >= lb[2] && z <= ub[2],
+                            "conflict preserves enumerated integer assignments");
+    lb = {3, 0, 4};
+    ub = {5, 5, 5};
+    require(!propagate_bound_conflicts(clauses, types, lb, ub, changes),
+            "general bound clause detects contradiction");
+    types.assign(3, VarType::Continuous);
+    lb = {3, 0, 0};
+    ub = {5, 5, 5};
+    require(propagate_bound_conflicts(clauses, types, lb, ub, changes),
+            "continuous conflict uses conservative closed complement");
+    require(lb[1] == 2, "continuous complement has no fabricated epsilon");
+}
 void simplex_and_cuts() {
     std::mt19937 generator(26119);
     for (int trial = 0; trial < 40; ++trial) {
@@ -1147,6 +1173,109 @@ void mip_research() {
             near(r.accuracy.objective, -2, 1e-5);
     }
 }
+void integer_lattice_cut_validity() {
+    for (int divisor : {2, 3, 7})
+        for (int upper = -4; upper <= 12; ++upper) {
+            auto m = model(2, 1, {{0, 0, double(2 * divisor)}, {0, 1, double(-divisor)}});
+            m.types.assign(2, VarType::Integer);
+            m.lb = {-3, -3};
+            m.ub = {3, 3};
+            m.ru = {double(upper)};
+            auto original = m;
+            add_integer_lattice_cuts(m, 8);
+            for (int x = -3; x <= 3; ++x)
+                for (int y = -3; y <= 3; ++y)
+                    if (2 * divisor * x - divisor * y <= upper)
+                        for (int64_t row = 1; row < m.A.rows; ++row) {
+                            auto activity = m.A.multiply({double(x), double(y)});
+                            require(activity[row] >= m.rl[row] && activity[row] <= m.ru[row],
+                                    "lattice cuts retain every feasible integer point");
+                        }
+            require(add_integer_lattice_cuts(m, 8) == 0, "lattice separator deduplicates rows");
+        }
+}
+void gpu_sparse_compaction() {
+    if (!cuda_available())
+        return;
+    auto a =
+        Sparse::build(4, 4, {{0, 0, 1}, {0, 2, 2}, {1, 1, 3}, {2, 0, 4}, {2, 3, 5}, {3, 2, 6}});
+    auto compact = cuda_compact_matrix(a, {0, 2}, {0, -1, 1, -1}, 2);
+    auto expected = Sparse::build(2, 2, {{0, 0, 1}, {0, 1, 2}, {1, 0, 4}});
+    require(compact.ptr == expected.ptr && compact.index == expected.index &&
+                compact.value == expected.value,
+            "CUDA CSR compaction equals independent host construction");
+    compact = cuda_compact_matrix(a, {}, {-1, -1, -1, -1}, 0);
+    require(compact.ptr == std::vector<int64_t>{0} && compact.value.empty(),
+            "CUDA empty compaction");
+    compact = cuda_compact_matrix(a, {1, 3}, {-1, -1, -1, -1}, 0);
+    require(compact.ptr == std::vector<int64_t>({0, 0, 0}) && compact.value.empty(),
+            "CUDA zero-column compaction");
+    auto m = model(4, 4, {{0, 0, 1}, {0, 1, 2}, {1, 0, 1}, {1, 1, 2}, {2, 2, 1}, {3, 3, 1}});
+    m.lb = {0, 2, 0, 0};
+    m.ub = {10, 2, 10, 10};
+    m.rl = {5, 6, -inf, -inf};
+    m.ru = {12, 11, 10, 7};
+    Options host;
+    host.scaling_passes = 0;
+    auto cpu = prepare(m, host);
+    host.gpu_presolve = true;
+    auto gpu = prepare(m, host);
+    require(cpu.model.A.ptr == gpu.model.A.ptr && cpu.model.A.index == gpu.model.A.index &&
+                cpu.model.A.value == gpu.model.A.value && cpu.model.rl == gpu.model.rl &&
+                cpu.model.ru == gpu.model.ru && cpu.cols == gpu.cols && cpu.rows == gpu.rows,
+            "GPU presolve fixed columns and merged/removed rows match CPU IR");
+}
+void propagated_bound_dual_postsolve() {
+    auto m = model(2, 2, {{0, 0, 1}, {0, 1, 1}, {1, 1, 1}});
+    m.lb = {0, 0};
+    m.ub = {10, 10};
+    m.rl = {6, -inf};
+    m.ru = {inf, 3};
+    m.c = {1, -.1};
+    Options o;
+    o.device = "cpu";
+    auto proof = prove_gpu_bounds(m, {3, 0}, {10, 3}, o);
+    require(proof.derivations.size() >= 2, "transitive bound proof DAG created");
+    near(proof.lower[0], 3);
+    near(proof.upper[1], 3);
+    auto y = proof.lift_dual(m, {3, 3}, {0, 0});
+    auto a = verify(m, {3, 3}, y);
+    require(a.finite && a.kkt < 1e-10, "LP implied-bound normals restored into original rows");
+    for (int sx : {-1, 1})
+        for (int sz : {-1, 1})
+            for (int sr : {-1, 1}) {
+                auto signed_model = model(
+                    2, 2,
+                    {{0, 0, double(sr * sx)}, {0, 1, double(sr * sz)}, {1, 1, double(sr * sz)}});
+                signed_model.lb = {sx > 0 ? 0. : -10., sz > 0 ? 0. : -10.};
+                signed_model.ub = {sx > 0 ? 10. : 0., sz > 0 ? 10. : 0.};
+                signed_model.rl = sr > 0 ? m.rl : std::vector<double>{-inf, -3};
+                signed_model.ru = sr > 0 ? m.ru : std::vector<double>{-6, inf};
+                signed_model.c = {double(sx), -.1 * sz};
+                auto signed_proof =
+                    prove_gpu_bounds(signed_model, {sx > 0 ? 3. : -10., sz > 0 ? 0. : -3.},
+                                     {sx > 0 ? 10. : -3., sz > 0 ? 3. : 0.}, o);
+                std::vector<double> solution{3. * sx, 3. * sz};
+                auto signed_y = signed_proof.lift_dual(signed_model, solution, {0, 0});
+                require(verify(signed_model, solution, signed_y).kkt < 1e-10,
+                        "bound dual postsolve survives row and column sign transformations");
+            }
+    m.c = {0, 0};
+    m.q = {2, 0};
+    y = proof.lift_dual(m, {3, 3}, {0, 0});
+    a = verify(m, {3, 3}, y);
+    require(a.finite && a.kkt < 1e-10, "QP Hessian included in dual bound postsolve");
+    if (cuda_available()) {
+        o.device = "cuda";
+        o.method = "pdhg";
+        o.gpu_presolve = true;
+        o.gpu_monitor = true;
+        auto r = solve(m, o);
+        require(r.status == "OPTIMAL" && r.bounds_tightened >= 2,
+                "GPU implied bounds used in actual QP model");
+        require(verify(m, r.x, r.y).kkt <= o.tol, "GPU postsolve verifies on original QP");
+    }
+}
 void singular_sparse_ordering() {
     // Q = sum_j (e_0 - 2 e_j)(e_0 - 2 e_j)^T is exactly PSD and singular.
     // Natural-order elimination fills a dense leaf clique; AMD avoids that fill.
@@ -1154,16 +1283,21 @@ void singular_sparse_ordering() {
     auto m = model(n, 0, {});
     std::vector<Entry> entries{{0, 0, n - 1.}};
     for (int j = 1; j < n; ++j) {
-        entries.push_back({0,j,-2}); entries.push_back({j,0,-2});
-        entries.push_back({j,j,4});
+        entries.push_back({0, j, -2});
+        entries.push_back({j, 0, -2});
+        entries.push_back({j, j, 4});
     }
-    m.Q = Sparse::build(n,n,entries);
+    m.Q = Sparse::build(n, n, entries);
     m.validate();
     require(true, "large singular weighted-star PSD validated without dense fill");
     entries.back().value = 3;
-    m.Q = Sparse::build(n,n,entries);
+    m.Q = Sparse::build(n, n, entries);
     bool rejected = false;
-    try { m.validate(); } catch (const std::exception &) { rejected = true; }
+    try {
+        m.validate();
+    } catch (const std::exception &) {
+        rejected = true;
+    }
     require(rejected, "negative curvature remains rejected after sparse reordering");
 }
 } // namespace
@@ -1174,9 +1308,13 @@ int main() {
         gpu_execution();
         sparse_quadratic();
         singular_sparse_ordering();
+        propagated_bound_dual_postsolve();
+        gpu_sparse_compaction();
+        integer_lattice_cut_validity();
         quadratic_extensions();
         sparse_qp_recession_guard();
         binary_conflict_propagation();
+        general_bound_conflict_propagation();
         simplex_and_cuts();
         completion_regressions();
         scaling();

@@ -106,8 +106,8 @@ Requirements: CMake ≥3.24, a C++20 compiler, Python ≥3.10 for scripts. CUDA 
 | CPU and CUDA | Shared first-order formulation; OpenMP CPU loops; Eigen numerical sparse factorization; cuSPARSE SpMV/SpMM, reusable matrix contexts, graph execution and device diagnostics |
 | LP | Adaptive/restarted PDHG, opt-in Halpern/reflected methods; compact revised primal/dual simplex with recovery and basis reoptimization; experimental predictor-corrector barrier and verified concurrent portfolio |
 | Convex QP / MIQP | Diagonal proximal updates; symmetric sparse convex Q via smooth splitting; QP relaxations and conservative minorant bounds for MIQP |
-| MILP / MIQP | Bound-delta nodes, search policies, reliability branching, restricted root/node/global cut pools, binary no-good conflicts, pump/RINS/local branching; verified incumbents and conservative bounds |
-| Preprocessing | Fixed-variable and bounded isolated-column elimination, empty rows, row-activity infeasibility checks, reversible reconstruction |
+| MILP / MIQP | Bound-delta nodes, search policies, reliability branching, restricted root/node/global cut pools, replay-proved binary/general bound conflicts, integer-lattice/MIR/cover/clique cuts, pump/RINS/local branching; verified incumbents and conservative bounds |
+| Preprocessing | Fixed-variable and bounded isolated-column elimination, empty rows, row-activity infeasibility checks; opt-in CUDA bound propagation and CSR compaction with host derivation replay and original-space dual reconstruction |
 | Scaling | Iterative diagonal equilibration with original-space verification |
 | Input | MPS linear/integer sections and ranges; symmetric/triangular `QMATRIX`/`QUADOBJ`; documented LP text subset; sparse JSON; supported continuous QPLIB |
 | Verification | Original objective, row/bound feasibility, integrality, projected stationarity, complementarity, and Lagrangian lower bound |
@@ -187,7 +187,7 @@ The historical [Phase 2 measured comparison](docs/phase2_results.md) records 8/9
 
 ## Limits and next phase
 
-Supported sparse QP and convex MIQP, revised dual simplex, an experimental barrier, restricted cut/conflict pools, reusable CUDA matrix contexts and actual first-order/tree checkpoints are implemented. This does not imply mature industrial robustness. Uncertain large PSD recognition, unrestricted global cut/conflict analysis, full GPU presolve compaction and fully device-resident control remain pending. Barrier/simplex/concurrent full-state checkpointing is unsupported; nonlinear and general nonconvex optimization remain out of scope. AMD/HIP is deferred.
+Supported sparse QP and convex MIQP, revised dual simplex, an experimental barrier, controlled cut/conflict pools, reusable CUDA contexts and first-order/tree/simplex/barrier/portfolio checkpoints are implemented. Opt-in GPU presolve now applies continuous bound reductions with replayed derivations and dual reconstruction, and compacts retained CSR entries on CUDA. General-integer bound conflicts and integer-lattice cuts supplement binary conflicts and MIR/cover/clique cuts. These are tested research implementations, not mature industrial guarantees. Broader large-PSD recognition, implication-graph/dual conflict analysis, unrestricted tableau cuts, additional GPU reduction families, fully device-resident control and direct GPU barrier factorization remain pending. Checkpoint reconstruction refactorizes bases and does not reproduce concurrent race ordering bit for bit. Nonlinear and general nonconvex optimization remain out of scope; AMD/HIP is deferred.
 
 MILP may return no incumbent or a feasible incumbent with an unresolved gap. Time checks occur at control boundaries; parsing, presolve, numerical kernels and final verification can overrun the budget. The public railway stress campaign explicitly retains these limits and process watchdog timeouts.
 
@@ -232,7 +232,7 @@ Run `scripts/run_certificate_demo.sh` for an offline valid → invalid → valid
 
 Current implementation and remaining work: [2026-09-28 record](docs/improvements_20260928.md).
 
-GPU restart, propagation and conflict updates: [implementation and limits](docs/gpu_conflicts_20260928.md).
+GPU restart, propagation and conflict updates: [implementation and limits](docs/gpu_conflicts_20260928.md). Latest bound-proof, GPU compaction and general-integer conflict additions: [source validation record](docs/gpu_presolve_bound_conflicts_20260928.md).
 
 ## Automatic solver selection
 

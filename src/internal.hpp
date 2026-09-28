@@ -23,6 +23,24 @@ struct Prepared {
     std::vector<double> restore_x(const std::vector<double> &) const;
     std::vector<double> restore_y(const std::vector<double> &, size_t original_rows) const;
 };
+struct BoundDerivation {
+    int64_t variable, row;
+    bool lower;
+    double row_multiplier;
+    std::vector<std::pair<int64_t, double>> dependencies;
+};
+struct BoundPostsolve {
+    std::vector<double> lower, upper;
+    std::vector<int64_t> lower_sources, upper_sources;
+    std::vector<BoundDerivation> derivations;
+    Sparse transpose;
+    std::vector<double> lift_dual(const Model &, const std::vector<double> &x,
+                                  const std::vector<double> &y, bool objective = true) const;
+};
+BoundPostsolve prove_gpu_bounds(const Model &, const std::vector<double> &,
+                                const std::vector<double> &, const Options &);
+Sparse cuda_compact_matrix(const Sparse &, const std::vector<int64_t> &,
+                           const std::vector<int64_t> &, int64_t columns);
 Prepared prepare(const Model &, const Options &);
 int64_t simplex_row_limit();
 Result solve_simplex(const Model &, const Options &);
@@ -33,6 +51,7 @@ double power_norm(const Sparse &, int iterations);
 Model dual_feasibility_model(const Model &);
 int add_binary_cuts(Model &, int limit);
 int add_mir_cuts(Model &, int limit, const std::vector<double> *point = nullptr);
+int add_integer_lattice_cuts(Model &, int limit, const std::vector<double> *point = nullptr);
 bool cuda_propagate_integer_bounds(const Model &, std::vector<double> &, std::vector<double> &,
                                    int passes = 5);
 std::vector<Result> cuda_batch_relaxations(const Model &, const std::vector<std::vector<double>> &,
@@ -56,6 +75,24 @@ class PrimalWeightController {
         initialized = v[2] != 0;
     }
 };
+struct BoundLiteral {
+    int64_t variable;
+    bool lower;
+    double value;
+    bool operator==(const BoundLiteral &other) const {
+        return variable == other.variable && lower == other.lower && value == other.value;
+    }
+    bool operator<(const BoundLiteral &other) const {
+        if (variable != other.variable)
+            return variable < other.variable;
+        if (lower != other.lower)
+            return lower < other.lower;
+        return value < other.value;
+    }
+};
+bool propagate_bound_conflicts(const std::vector<std::vector<BoundLiteral>> &,
+                               const std::vector<VarType> &, std::vector<double> &,
+                               std::vector<double> &, int64_t &);
 // Clauses forbid a conjunction of binary assignments. False means contradiction.
 bool propagate_binary_conflicts(const std::vector<std::vector<std::pair<int64_t, int>>> &,
                                 std::vector<double> &, std::vector<double> &, int64_t &);

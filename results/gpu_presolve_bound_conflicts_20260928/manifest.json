@@ -1,0 +1,20 @@
+{
+  "date": "2026-09-28",
+  "base_commit": "5193da2002750a9d9b240cfb5c8f29d4819dce03",
+  "source_sha256": {
+    "src/bound_postsolve.cpp": "33103e8f81debd6ee4037b9f7069e591eee444d00151c0b0b6f9fd9713ddeeca",
+    "src/cuda.cu": "30c3f8929e9a9c277d802570b6fef1a233b43945a211b2bca78ae76778409313",
+    "src/cuts.cpp": "7b583bd4c482a99aa809a4b0e40cf5d9e9801a326d0a6f0a0530f7ff5adbf4f6",
+    "src/mip.cpp": "a16557385dcc9499d644cdac80cf35a1c54a2705807d32253385049406ae950c",
+    "src/preprocess.cpp": "d4bca0eaf2050106a101629d76b7019bc509ea7f877f24f340e8a146528976f7",
+    "src/solver.cpp": "f9751b0ebf3ebc81e8fd7481e1b31bce2b2bb1fb983c98dacf8b322dcca49553",
+    "tests/test_research.cpp": "a1ac75533fdabf62225514a6bdc01cecfa58c7bf543f37cbe90daf90c3374e25",
+    "tests/test_conflict_learning.py": "132db9d8dba0314b4f3aa20cf95ab7a4068e601c30bfccb2e5176380a61b86a2",
+    "tests/test_engine_checkpoints.py": "d7e18d099a939c361afe2a36632ca2af18dbf0b6adcad36c70bc587fee413c3b"
+  },
+  "cuda_research_assertions": 17461,
+  "hardware": "NVIDIA RTX 4060 Laptop GPU; CUDA 13.4",
+  "validation": "full CUDA regression suite; CPU ASan/UBSan CTest; general conflict replay and GPU-presolve checkpoints",
+  "published_packages_include_update": false,
+  "speedup_measured": false
+}

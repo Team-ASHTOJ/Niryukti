@@ -1,7 +1,56 @@
 #include "internal.hpp"
+#include <numeric>
 #include <set>
 #include <stdexcept>
 namespace vantage {
+bool propagate_bound_conflicts(const std::vector<std::vector<BoundLiteral>> &clauses,
+                               const std::vector<VarType> &types, std::vector<double> &lb,
+                               std::vector<double> &ub, int64_t &tightened) {
+    for (size_t pass = 0; pass <= clauses.size(); ++pass) {
+        bool changed = false;
+        for (const auto &clause : clauses) {
+            size_t unknown = 0;
+            BoundLiteral unit{};
+            bool satisfied = false;
+            for (const auto &literal : clause) {
+                auto j = literal.variable;
+                if (literal.lower ? ub[j] < literal.value : lb[j] > literal.value) {
+                    satisfied = true;
+                    break;
+                }
+                if (!(literal.lower ? lb[j] >= literal.value : ub[j] <= literal.value)) {
+                    ++unknown;
+                    unit = literal;
+                }
+            }
+            if (satisfied)
+                continue;
+            if (!unknown)
+                return false;
+            if (unknown == 1) {
+                auto j = unit.variable;
+                bool exact_integer = types[j] != VarType::Continuous &&
+                                     std::abs(unit.value) < 0x1p52 &&
+                                     unit.value == std::floor(unit.value);
+                // Continuous negation is strict; its weak closed relaxation is
+                // safe for tightening. We never substitute a guessed epsilon.
+                double value = unit.value + (exact_integer ? (unit.lower ? -1. : 1.) : 0.);
+                double &bound = unit.lower ? ub[j] : lb[j];
+                double next = unit.lower ? std::min(bound, value) : std::max(bound, value);
+                if (next != bound) {
+                    bound = next;
+                    changed = true;
+                    ++tightened;
+                }
+                if (lb[j] > ub[j])
+                    return false;
+            }
+        }
+        if (!changed)
+            break;
+    }
+    return true;
+}
 bool propagate_binary_conflicts(const std::vector<std::vector<std::pair<int64_t, int>>> &clauses,
                                 std::vector<double> &lb, std::vector<double> &ub,
                                 int64_t &tightened) {
@@ -39,6 +88,85 @@ bool propagate_binary_conflicts(const std::vector<std::vector<std::pair<int64_t,
             break;
     }
     return true;
+}
+int add_integer_lattice_cuts(Model &m, int limit, const std::vector<double> *point) {
+    if (point && point->size() != m.c.size())
+        throw std::runtime_error("Lattice cut point dimensions");
+    if (limit <= 0)
+        return 0;
+    std::vector<Entry> entries;
+    std::set<std::vector<double>> seen;
+    const auto rows = m.A.rows;
+    for (int64_t row = 0; row < rows; ++row) {
+        std::vector<double> key;
+        for (auto k = m.A.ptr[row]; k < m.A.ptr[row + 1]; ++k) {
+            entries.push_back({row, m.A.index[k], m.A.value[k]});
+            key.push_back(double(m.A.index[k]));
+            key.push_back(m.A.value[k]);
+        }
+        key.push_back(m.rl[row]);
+        key.push_back(m.ru[row]);
+        seen.insert(key);
+    }
+    int added = 0;
+    for (int64_t row = 0; row < rows && added < limit; ++row) {
+        int64_t divisor = 0;
+        bool valid = true;
+        for (auto k = m.A.ptr[row]; k < m.A.ptr[row + 1]; ++k) {
+            double a = m.A.value[k];
+            if (m.types[m.A.index[k]] == VarType::Continuous || std::abs(a) > 0x1p30 ||
+                a != std::floor(a)) {
+                valid = false;
+                break;
+            }
+            divisor = std::gcd(divisor, int64_t(std::abs(a)));
+        }
+        if (!valid || divisor <= 1)
+            continue;
+        double lower = std::isfinite(m.rl[row])
+                           ? double(std::ceil(std::nextafter((long double)m.rl[row] / divisor,
+                                                             -(long double)inf)))
+                           : -inf;
+        double upper = std::isfinite(m.ru[row])
+                           ? double(std::floor(std::nextafter((long double)m.ru[row] / divisor,
+                                                              (long double)inf)))
+                           : inf;
+        // Integer dot products occupy a lattice. Restrict to exactly representable
+        // endpoints; no coefficient rounding or epsilon is used in the proof.
+        if ((std::isfinite(lower) && std::abs(lower) >= 0x1p52) ||
+            (std::isfinite(upper) && std::abs(upper) >= 0x1p52))
+            continue;
+        if (lower <= m.rl[row] / divisor && upper >= m.ru[row] / divisor)
+            continue;
+        // Keep each appended row well formed even when the integer lattice
+        // proves an equality infeasible. The original lower row plus this
+        // rounded upper row still supplies the contradiction to propagation.
+        if (lower > upper)
+            lower = -inf;
+        std::vector<double> key;
+        long double activity = 0;
+        for (auto k = m.A.ptr[row]; k < m.A.ptr[row + 1]; ++k) {
+            key.push_back(double(m.A.index[k]));
+            key.push_back(m.A.value[k] / divisor);
+            if (point)
+                activity += (long double)(m.A.value[k] / divisor) * (*point)[m.A.index[k]];
+        }
+        key.push_back(lower);
+        key.push_back(upper);
+        if (seen.count(key) || (point && activity >= lower - 1e-7 && activity <= upper + 1e-7))
+            continue;
+        seen.insert(key);
+        auto destination = int64_t(m.rl.size());
+        for (auto k = m.A.ptr[row]; k < m.A.ptr[row + 1]; ++k)
+            entries.push_back({destination, m.A.index[k], m.A.value[k] / divisor});
+        m.rl.push_back(lower);
+        m.ru.push_back(upper);
+        m.row_names.push_back("niryukti_lattice_" + std::to_string(destination));
+        ++added;
+    }
+    if (added)
+        m.A = Sparse::build(m.rl.size(), m.c.size(), std::move(entries));
+    return added;
 }
 int add_mir_cuts(Model &m, int limit, const std::vector<double> *point) {
     if (point && point->size() != m.c.size())

@@ -1,6 +1,11 @@
 #include "internal.hpp"
 #include <stdexcept>
 namespace vantage {
+Sparse cuda_compact_matrix(const Sparse &, const std::vector<int64_t> &,
+                           const std::vector<int64_t> &, int64_t) {
+    throw std::runtime_error("GPU matrix compaction requires a CUDA build");
+}
+
 bool cuda_propagate_integer_bounds(const Model &, std::vector<double> &, std::vector<double> &,
                                    int) {
     throw std::runtime_error("GPU propagation requires a CUDA build");
@@ -14,7 +19,9 @@ std::vector<double> cuda_linear_solve(const Sparse &, const std::vector<double> 
                                       const Options &) {
     throw std::runtime_error("GPU Newton solve requires CUDA");
 }
-Hardware hardware_info() { return {}; }
+Hardware hardware_info() {
+    return {};
+}
 bool cuda_available() {
     return false;
 }

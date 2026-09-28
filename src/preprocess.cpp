@@ -195,6 +195,7 @@ Prepared prepare(const Model &src, const Options &o) {
                 m.offset += .5 * v * p.fixed[i] * p.fixed[j];
         }
     m.Q = Sparse::build(m.c.size(), m.c.size(), std::move(qe));
+    const bool device_compaction = o.gpu_presolve && cuda_available();
     std::vector<Entry> e;
     std::map<std::vector<std::pair<int64_t, double>>, size_t> duplicate_rows;
     for (size_t i = 0; i < src.rl.size(); i++) {
@@ -288,10 +289,15 @@ Prepared prepare(const Model &src, const Options &o) {
         m.ru.push_back(u);
         m.row_names.push_back(src.row_names[i]);
         for (auto k = src.A.ptr[i]; k < src.A.ptr[i + 1]; k++)
-            if (map[src.A.index[k]] >= 0)
+            if (!device_compaction && map[src.A.index[k]] >= 0)
                 e.push_back({int64_t(row), map[src.A.index[k]], src.A.value[k]});
     }
-    m.A = Sparse::build(m.rl.size(), m.c.size(), std::move(e));
+    if (device_compaction) {
+        // Reduction decisions and reversible metadata remain on the host;
+        // retained CSR entries are counted, scanned and compacted on CUDA.
+        m.A = cuda_compact_matrix(src.A, p.rows, map, m.c.size());
+    } else
+        m.A = Sparse::build(m.rl.size(), m.c.size(), std::move(e));
     p.column_scale.assign(m.c.size(), 1);
     p.row_scale.assign(m.rl.size(), 1);
     if (o.scaling == "combined" && o.scaling_passes > 0)

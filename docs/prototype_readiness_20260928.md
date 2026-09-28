@@ -62,13 +62,15 @@ remains active there.
 
 ### Known capability limits / larger implementation projects
 
-- Complete GPU presolve compaction and reduction families with reversible primal
-  and dual postsolve provenance. Continuous GPU bounds currently initialize LP/QP
-  points rather than silently changing their dual box; MIP nodes use valid tightening.
+- Additional GPU presolve reduction families beyond directed bound propagation
+  and retained-CSR compaction. Continuous tightening now uses host-replayed
+  derivations and original-space dual postsolve; general presolve decisions and
+  reversible metadata remain on the CPU. See the latest source validation record.
 - Fully device-resident restart/weight/control decisions. Device trial acceptance,
   monitoring and resident restart copies exist; host control still participates.
 - General implication-graph/dual conflicts and unrestricted tableau separators.
-  Current replay-minimized binary clauses and MIR/cover/clique cuts have defined scope.
+  Current replay-minimized binary/general bound clauses and integer-lattice,
+  MIR/cover/clique cuts have defined scope.
 - Unrestricted large singular PSD QP certification and difficult large MILP/MIQP
   performance; current supported sparse convex classes are guarded.
 - Direct GPU sparse barrier factorization and high-accuracy robustness. Current

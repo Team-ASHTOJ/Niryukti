@@ -1,5 +1,7 @@
 # GPU control, presolve and conflicts — 2026-09-28
 
+> Historical record: the follow-up in [GPU bound proofs and general conflicts](gpu_presolve_bound_conflicts_20260928.md) supersedes the continuous-bound, compaction and binary-only limitations below.
+
 ## Changes in this round
 
 - GPU restarts select the resident current or averaged candidate with device

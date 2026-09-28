@@ -1,6 +1,9 @@
 #include "gpu_compat.hpp"
 #include "internal.hpp"
 #include <climits>
+#ifndef VANTAGE_HAS_HIP
+#include <cub/device/device_scan.cuh>
+#endif
 #include <stdexcept>
 namespace vantage {
 namespace {
@@ -946,6 +949,87 @@ class CudaBackend final : public IterationBackend {
     }
 };
 } // namespace
+namespace {
+__global__ void compact_count(int64_t rows, const int64_t *kept, const int64_t *ptr,
+                              const int64_t *index, const int64_t *columns, int64_t *counts) {
+    auto row = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (row > rows)
+        return;
+    int64_t count = 0;
+    if (row < rows)
+        for (auto k = ptr[kept[row]]; k < ptr[kept[row] + 1]; ++k)
+            count += columns[index[k]] >= 0;
+    counts[row] = count;
+}
+__global__ void compact_scatter(int64_t rows, const int64_t *kept, const int64_t *ptr,
+                                const int64_t *index, const double *values, const int64_t *columns,
+                                const int64_t *output_ptr, int64_t *output_index,
+                                double *output_values) {
+    auto row = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (row >= rows)
+        return;
+    auto destination = output_ptr[row];
+    for (auto k = ptr[kept[row]]; k < ptr[kept[row] + 1]; ++k)
+        if (columns[index[k]] >= 0) {
+            output_index[destination] = columns[index[k]];
+            output_values[destination++] = values[k];
+        }
+}
+} // namespace
+Sparse cuda_compact_matrix(const Sparse &matrix, const std::vector<int64_t> &rows,
+                           const std::vector<int64_t> &columns, int64_t output_columns) {
+#ifdef VANTAGE_HAS_HIP
+    throw std::runtime_error("GPU compaction currently requires CUDA");
+#else
+    if (columns.size() != size_t(matrix.cols) || output_columns < 0 || rows.size() >= INT_MAX)
+        throw std::runtime_error("GPU compaction dimensions");
+    int64_t previous = -1;
+    for (auto row : rows) {
+        if (row <= previous || row >= matrix.rows)
+            throw std::runtime_error("GPU compaction row map");
+        previous = row;
+    }
+    previous = -1;
+    for (auto column : columns)
+        if (column >= 0) {
+            if (column <= previous || column >= output_columns)
+                throw std::runtime_error("GPU compaction column map");
+            previous = column;
+        }
+    Sparse result;
+    result.rows = rows.size();
+    result.cols = output_columns;
+    if (rows.empty()) {
+        result.ptr = {0};
+        return result;
+    }
+    Buffer<int64_t> ptr(matrix.ptr), index(matrix.index), kept(rows), map(columns);
+    Buffer<double> values(matrix.value);
+    Buffer<int64_t> counts(rows.size() + 1), output_ptr(rows.size() + 1);
+    compact_count<<<(rows.size() + 256) / 256, 256>>>(rows.size(), kept.p, ptr.p, index.p, map.p,
+                                                      counts.p);
+    check(cudaGetLastError(), "GPU compaction count");
+    size_t scratch_bytes = 0;
+    check(cub::DeviceScan::ExclusiveSum(nullptr, scratch_bytes, counts.p, output_ptr.p,
+                                        int(rows.size() + 1)),
+          "GPU compaction scan size");
+    Buffer<unsigned char> scratch(scratch_bytes);
+    check(cub::DeviceScan::ExclusiveSum(scratch.p, scratch_bytes, counts.p, output_ptr.p,
+                                        int(rows.size() + 1)),
+          "GPU compaction scan");
+    output_ptr.download(result.ptr);
+    Buffer<int64_t> output_index(result.ptr.back());
+    Buffer<double> output_values(result.ptr.back());
+    compact_scatter<<<(rows.size() + 255) / 256, 256>>>(rows.size(), kept.p, ptr.p, index.p,
+                                                        values.p, map.p, output_ptr.p,
+                                                        output_index.p, output_values.p);
+    check(cudaGetLastError(), "GPU compaction scatter");
+    output_index.download(result.index);
+    output_values.download(result.value);
+    check(cudaDeviceSynchronize(), "GPU compaction completion");
+    return result;
+#endif
+}
 bool cuda_propagate_integer_bounds(const Model &m, std::vector<double> &lb, std::vector<double> &ub,
                                    int passes) {
 #ifdef VANTAGE_HAS_HIP

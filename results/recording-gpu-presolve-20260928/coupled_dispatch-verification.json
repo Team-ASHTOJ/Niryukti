@@ -1,0 +1,82 @@
+{
+  "accuracy": {
+    "complementarity": 0.00011533283877186166,
+    "dual_absolute": 1.1878803496401247e-07,
+    "dual_bound": 2833.3098505330026,
+    "dual_residual": 7.424252185250779e-09,
+    "finite": true,
+    "integrality": 0.0,
+    "kkt_error": 4.069168163003974e-08,
+    "primal_absolute": 4.093179200026498e-06,
+    "primal_residual": 2.7107147020043033e-08,
+    "relative_gap": 4.069168163003974e-08
+  },
+  "dual": [
+    -26.070422920642915
+  ],
+  "gpu_execution": {
+    "cuda_graphs": false,
+    "index_bits": 0,
+    "matrix_precision": "fp64"
+  },
+  "hardware": {
+    "backend": "cpu",
+    "device": "CPU",
+    "precision": "FP64"
+  },
+  "message": "",
+  "model": {
+    "columns": 3,
+    "fingerprint": "8fcddc8c0fcb721d",
+    "name": "synthetic_coupled_power_dispatch",
+    "nonzeros": 3,
+    "row_names": [
+      "power_balance"
+    ],
+    "rows": 1,
+    "variable_names": [
+      "thermal_A",
+      "thermal_B",
+      "thermal_C"
+    ]
+  },
+  "objective": 2833.309965865842,
+  "performance": {
+    "host_candidate_checks": 0,
+    "iteration_seconds": 0.0,
+    "iterations": 0,
+    "monitor_checks": 0,
+    "operator_norm_estimate": 0.0,
+    "polishing_attempts": 0,
+    "polishing_iterations": 0,
+    "preprocess_seconds": 0.0,
+    "rejected_steps": 0,
+    "restarts": 0,
+    "skipped_candidate_checks": 0,
+    "total_seconds": 0.0,
+    "transfer_setup_seconds": 0.0,
+    "verification_seconds": 0.0,
+    "weight_updates": 0
+  },
+  "presolve": {
+    "bounds_tightened": 0,
+    "removed_columns": 0,
+    "removed_rows": 0
+  },
+  "primal": [
+    69.71831126547471,
+    48.4507056240355,
+    31.830987203669
+  ],
+  "problem_type": "QP",
+  "selection": {
+    "device": "cpu",
+    "estimated_gpu_bytes": 0.0,
+    "method": "",
+    "reason": "",
+    "relaxation_method": ""
+  },
+  "solver": "NIRYUKTI",
+  "status": "VERIFIED_OPTIMAL",
+  "version": "0.2.1"
+}

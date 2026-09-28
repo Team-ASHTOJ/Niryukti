@@ -106,6 +106,7 @@ struct Result {
     double operator_norm_estimate = 0;
     int64_t cuts_added = 0, cut_rounds = 0, local_cuts_added = 0;
     int64_t conflicts_learned = 0, conflicts_pruned = 0, local_branching_calls = 0;
+    int64_t bound_conflicts_learned = 0, bound_conflicts_pruned = 0;
     int64_t monitor_checks = 0, host_candidate_checks = 0, skipped_candidate_checks = 0;
     int gpu_index_bits = 0;
     bool graph_execution = false;

@@ -1,4 +1,4 @@
-"""Independent enumeration and checkpoint evidence for learned binary clauses."""
+"""Independent enumeration and checkpoint evidence for learned bound clauses."""
 import json
 import os
 from pathlib import Path
@@ -39,6 +39,37 @@ class ConflictLearning(unittest.TestCase):
                     if all(((mask >> j) & 1) == value for j, value in clause):
                         self.assertTrue(any(sum((mask >> 'xyzw'.index(n)) & 1 for n in pair) != 1
                                             for pair in ('xy', 'yz', 'zx')))
+
+    def test_general_integer_bound_clauses_and_resume(self):
+        names = 'xyz'
+        pairs = ('xy', 'yz', 'zx')
+        model = {'variables': [{'name': n, 'lb': 2, 'ub': 3, 'type': 'integer'} for n in names],
+                 'objective': {'linear': [0, 0, 0]},
+                 'constraints': [{'name': f'r{i}', 'coefficients': dict.fromkeys(pair, 1), 'lb': 5, 'ub': 5}
+                                 for i, pair in enumerate(pairs)]}
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp)/'integer.json'; checkpoint = Path(temp)/'tree.json'
+            source.write_text(json.dumps(model))
+            command = [BINARY, 'solve', str(source), '--device', 'cpu', '--method', 'simplex',
+                       '--checkpoint-out', str(checkpoint), '--time-limit', '20']
+            run = subprocess.run(command, capture_output=True, text=True, timeout=30)
+            self.assertIn(run.returncode, (0, 2), run.stderr)
+            self.assertEqual(json.loads(run.stdout)['status'], 'INFEASIBLE')
+            saved = json.loads(checkpoint.read_text())
+            clauses = saved['bound_conflicts']
+            self.assertGreater(len(clauses), 0)
+            self.assertGreater(saved['statistics']['bound_conflicts_learned'], 0)
+            for clause in clauses:
+                for mask in range(8):
+                    point = [2 + ((mask >> j) & 1) for j in range(3)]
+                    forbidden = all(point[l['variable']] >= l['value'] if l['lower'] else
+                                    point[l['variable']] <= l['value'] for l in clause)
+                    if forbidden:
+                        self.assertTrue(any(sum(point[names.index(n)] for n in pair) != 5 for pair in pairs))
+            resumed = subprocess.run(command + ['--resume', str(checkpoint)], capture_output=True,
+                                     text=True, timeout=30)
+            self.assertIn(resumed.returncode, (0, 2), resumed.stderr)
+            self.assertEqual(json.loads(resumed.stdout)['status'], 'INFEASIBLE')
 
 if __name__ == '__main__':
     unittest.main()

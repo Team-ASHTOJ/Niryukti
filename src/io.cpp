@@ -943,7 +943,10 @@ std::string result_json(const Model &m, const Result &r) {
           {"restarts", r.restarts},
           {"rejected_steps", r.rejected_steps}}},
         {"hardware", {{"backend", r.backend}, {"device", r.device_name}, {"precision", "FP64"}}},
-        {"presolve", {{"removed_rows", r.removed_rows}, {"removed_columns", r.removed_columns}}},
+        {"presolve",
+         {{"removed_rows", r.removed_rows},
+          {"removed_columns", r.removed_columns},
+          {"bounds_tightened", r.bounds_tightened}}},
         {"primal", r.x},
         {"dual", r.y}};
     if (!r.basis.empty())
@@ -972,6 +975,8 @@ std::string result_json(const Model &m, const Result &r) {
             {"local_cuts_added", r.local_cuts_added},
             {"conflicts_learned", r.conflicts_learned},
             {"conflicts_pruned", r.conflicts_pruned},
+            {"bound_conflicts_learned", r.bound_conflicts_learned},
+            {"bound_conflicts_pruned", r.bound_conflicts_pruned},
             {"local_branching_calls", r.local_branching_calls},
             {"pump_rounds", r.pump_rounds},
             {"rins_calls", r.rins_calls},

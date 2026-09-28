@@ -153,6 +153,7 @@ Result solve_mip(const Model &original, const Options &options) {
     Model relaxation = original;
     if (options.cuts) {
         out.cuts_added = add_binary_cuts(relaxation, 64);
+        out.cuts_added += add_integer_lattice_cuts(relaxation, 32);
         out.cuts_added += add_mir_cuts(relaxation, 64);
     }
     std::fill(relaxation.types.begin(), relaxation.types.end(), VarType::Continuous);
@@ -298,6 +299,7 @@ Result solve_mip(const Model &original, const Options &options) {
                           {"threads", options.threads}};
     using Conflict = std::vector<std::pair<int64_t, int>>;
     std::vector<Conflict> conflicts;
+    std::vector<std::vector<BoundLiteral>> bound_conflicts;
     struct PooledCut {
         std::vector<std::pair<int64_t, double>> terms;
         double lower, upper, efficacy = 0;
@@ -325,7 +327,62 @@ Result solve_mip(const Model &original, const Options &options) {
         }
         model.A = Sparse::build(model.rl.size(), model.c.size(), std::move(entries));
     };
+    auto learn_bound_conflict = [&](const Node &node) {
+        std::vector<BoundLiteral> clause;
+        bool nonbinary = false;
+        for (size_t j = 0; j < original.c.size(); ++j) {
+            if (node.lb[j] > base_lb[j] && std::isfinite(node.lb[j]))
+                clause.push_back({int64_t(j), true, node.lb[j]});
+            if (node.ub[j] < base_ub[j] && std::isfinite(node.ub[j]))
+                clause.push_back({int64_t(j), false, node.ub[j]});
+            nonbinary |= original.types[j] != VarType::Binary &&
+                         (node.lb[j] > base_lb[j] || node.ub[j] < base_ub[j]);
+        }
+        if (!nonbinary || clause.empty() || clause.size() > 256)
+            return;
+        auto replay = [&](const std::vector<BoundLiteral> &literals) {
+            Node probe;
+            probe.lb = base_lb;
+            probe.ub = base_ub;
+            for (auto lit : literals) {
+                auto &bound = lit.lower ? probe.lb[lit.variable] : probe.ub[lit.variable];
+                bound = lit.lower ? std::max(bound, lit.value) : std::min(bound, lit.value);
+            }
+            int64_t ignored = 0;
+            return !propagate(original, probe, ignored);
+        };
+        // Every clause is replay-proved using original rows, independently of
+        // learned cuts and relaxation limit statuses.
+        if (!replay(clause))
+            return;
+        int trials = 0;
+        for (size_t i = 0; i < clause.size() && trials < 16 && !stop_requested(options) &&
+                           elapsed(start) < options.time_limit;) {
+            auto reduced = clause;
+            reduced.erase(reduced.begin() + i);
+            ++trials;
+            if (!reduced.empty() && replay(reduced))
+                clause = std::move(reduced);
+            else
+                ++i;
+        }
+        std::sort(clause.begin(), clause.end());
+        for (const auto &old : bound_conflicts)
+            if (std::includes(clause.begin(), clause.end(), old.begin(), old.end()))
+                return;
+        bound_conflicts.erase(std::remove_if(bound_conflicts.begin(), bound_conflicts.end(),
+                                             [&](const auto &old) {
+                                                 return std::includes(old.begin(), old.end(),
+                                                                      clause.begin(), clause.end());
+                                             }),
+                              bound_conflicts.end());
+        if (bound_conflicts.size() == 128)
+            bound_conflicts.erase(bound_conflicts.begin());
+        bound_conflicts.push_back(std::move(clause));
+        ++out.bound_conflicts_learned;
+    };
     auto learn_conflict = [&](const Node &node) {
+        learn_bound_conflict(node);
         Conflict conflict;
         bool nonbinary_changes = false;
         for (size_t j = 0; j < original.c.size(); ++j) {
@@ -391,6 +448,14 @@ Result solve_mip(const Model &original, const Options &options) {
                       {"next_node_id", next_node_id},
                       {"x", out.x},
                       {"y", out.y}};
+        saved["bound_conflicts"] = Json::array();
+        for (const auto &clause : bound_conflicts) {
+            Json literals = Json::array();
+            for (auto l : clause)
+                literals.push_back(
+                    {{"variable", l.variable}, {"lower", l.lower}, {"value", l.value}});
+            saved["bound_conflicts"].push_back(literals);
+        }
         saved["cut_pool"] = Json::array();
         for (const auto &cut : cut_pool)
             saved["cut_pool"].push_back({{"terms", cut.terms},
@@ -439,6 +504,8 @@ Result solve_mip(const Model &original, const Options &options) {
                                {"heuristic_nodes", out.heuristic_nodes},
                                {"conflicts_learned", out.conflicts_learned},
                                {"conflicts_pruned", out.conflicts_pruned},
+                               {"bound_conflicts_learned", out.bound_conflicts_learned},
+                               {"bound_conflicts_pruned", out.bound_conflicts_pruned},
                                {"local_branching_calls", out.local_branching_calls}};
         std::filesystem::path destination(options.checkpoint_path);
         auto temporary = destination;
@@ -481,6 +548,21 @@ Result solve_mip(const Model &original, const Options &options) {
             cut_pool.push_back(std::move(cut));
             if (cut_pool.size() > 64)
                 throw std::runtime_error("Checkpoint cut pool capacity");
+        }
+        for (const auto &clause : saved.value("bound_conflicts", Json::array())) {
+            if (clause.empty() || clause.size() > 256 || bound_conflicts.size() >= 128)
+                throw std::runtime_error("Invalid checkpoint bound conflict capacity");
+            std::vector<BoundLiteral> literals;
+            for (const auto &item : clause) {
+                BoundLiteral l{item.at("variable").get<int64_t>(), item.at("lower").get<bool>(),
+                               item.at("value").get<double>()};
+                if (l.variable < 0 || l.variable >= int64_t(original.c.size()) ||
+                    !std::isfinite(l.value))
+                    throw std::runtime_error("Invalid checkpoint bound conflict literal");
+                literals.push_back(l);
+            }
+            std::sort(literals.begin(), literals.end());
+            bound_conflicts.push_back(std::move(literals));
         }
         conflicts = saved.at("conflicts").get<std::vector<Conflict>>();
         if (conflicts.size() > 128)
@@ -578,6 +660,8 @@ Result solve_mip(const Model &original, const Options &options) {
         out.heuristic_nodes = stats.at("heuristic_nodes");
         out.conflicts_learned = stats.at("conflicts_learned");
         out.conflicts_pruned = stats.at("conflicts_pruned");
+        out.bound_conflicts_learned = stats.value("bound_conflicts_learned", int64_t(0));
+        out.bound_conflicts_pruned = stats.value("bound_conflicts_pruned", int64_t(0));
         out.local_branching_calls = stats.at("local_branching_calls");
         if (out.nodes < 0 || out.iterations < 0)
             throw std::runtime_error("Negative checkpoint statistics");
@@ -603,6 +687,12 @@ Result solve_mip(const Model &original, const Options &options) {
         }
         if (cutoff(node.bound)) {
             closed = std::min(closed, node.bound);
+            continue;
+        }
+        if (!propagate_bound_conflicts(bound_conflicts, original.types, node.lb, node.ub,
+                                       out.bounds_tightened)) {
+            ++out.bound_conflicts_pruned;
+            ++out.nodes;
             continue;
         }
         bool conflict_pruned =
@@ -679,7 +769,8 @@ Result solve_mip(const Model &original, const Options &options) {
              ++round) {
             Model separated = relaxation;
             separated.types = original.types;
-            int added = add_mir_cuts(separated, 16, &r.x);
+            int added = add_integer_lattice_cuts(separated, 8, &r.x);
+            added += add_mir_cuts(separated, 16, &r.x);
             if (!added)
                 break;
             account_heuristic(r);
@@ -713,6 +804,7 @@ Result solve_mip(const Model &original, const Options &options) {
             auto global = root_relaxation;
             global.types = original.types;
             size_t first = global.rl.size();
+            add_integer_lattice_cuts(global, 8, &r.x);
             add_mir_cuts(global, 16, &r.x);
             for (size_t row = first; row < global.rl.size(); ++row) {
                 PooledCut cut;

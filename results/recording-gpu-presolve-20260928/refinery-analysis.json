@@ -1,0 +1,101 @@
+{
+  "advisor_scope": "Structural rule-based guidance, not a learned runtime prediction",
+  "analysis": {
+    "configuration": {
+      "branching": "fractional",
+      "cuts_enabled": false,
+      "iteration_limit": 100000,
+      "node_limit": 10000,
+      "node_selection": "best-bound",
+      "precision": "fp64",
+      "presolve": true,
+      "primal_heuristic": "repair",
+      "scaling": "ruiz",
+      "scaling_passes": 5,
+      "time_limit_seconds": 60.0,
+      "tolerance": 1e-06
+    },
+    "hardware": {
+      "cpu": "available",
+      "cuda_available": true,
+      "cuda_description": "NVIDIA GeForce RTX 4060 Laptop GPU (7888 MiB)",
+      "free_gpu_bytes": 8082292736.0,
+      "total_gpu_bytes": 8272019456.0
+    },
+    "mode": "auto",
+    "model": {
+      "binary_variables": 0,
+      "bounded_variables": 32,
+      "constraints": 36,
+      "continuous_variables": 32,
+      "csr_uses_less_estimated_storage_than_dense": true,
+      "equality_constraints": 8,
+      "fixed_variables": 0,
+      "incidence_components": 4,
+      "incidence_components_are_solver_decomposition": false,
+      "integer_variables": 0,
+      "matrix_coefficients": {
+        "maximum_absolute": 1.9000000000000001,
+        "minimum_absolute": 0.03333333333333344,
+        "range": 56.99999999999983
+      },
+      "matrix_density": 0.1111111111111111,
+      "nonzeros": 128,
+      "quadratic_diagonal_terms": 0,
+      "quadratic_off_diagonal_terms": 0,
+      "ranged_constraints": 0,
+      "variables": 32
+    },
+    "problem_class": "LP",
+    "reasons": [
+      "CPU: small sparse workload; transfer/launch costs dominate; compact LP admits sparse basis factorization"
+    ],
+    "runtime_estimate": null,
+    "selection": {
+      "algorithm": "simplex",
+      "device": "cpu",
+      "estimated_gpu_bytes": 22944.0,
+      "method": "simplex",
+      "profile": "none",
+      "reason": "CPU: small sparse workload; transfer/launch costs dominate; compact LP admits sparse basis factorization"
+    },
+    "verification_path": "original-model feasibility, objective consistency, stationarity and KKT checks"
+  },
+  "automatic_selection": {
+    "available_gpu_bytes": 8082292736.0,
+    "coefficient_range": 56.99999999999983,
+    "device": "cpu",
+    "estimated_gpu_bytes": 22944.0,
+    "method": "simplex",
+    "newton_fill_estimate": 576.0,
+    "policy": "deterministic structural heuristic; no performance guarantee",
+    "reason": "CPU: small sparse workload; transfer/launch costs dominate; compact LP admits sparse basis factorization",
+    "transformed_rows": 100
+  },
+  "columns": 32,
+  "fingerprint": "dbcbeb7aa08d01bc",
+  "gpu_storage_estimate_bytes": 22944.0,
+  "gpu_suitability_heuristic": "Low: launch and transfer overhead may dominate",
+  "method": "simplex",
+  "name": "synthetic_refinery_blending",
+  "nonzeros": 128,
+  "recommended_configuration": {
+    "branching": "fractional",
+    "cuts": false,
+    "device": "cpu",
+    "method": "simplex",
+    "precision": "fp64",
+    "primal_heuristic": "repair",
+    "scaling": "ruiz"
+  },
+  "rows": 36,
+  "structure": {
+    "component_scope": "constraint and quadratic incidence; no automatic decomposition",
+    "integer_variables": 0,
+    "quadratic_nonzeros": 0,
+    "transformed_row_estimate": 68,
+    "variable_components": 4
+  },
+  "type": "LP",
+  "verification": "Original-space feasibility, projected stationarity, complementarity and conservative relaxation bounds; MIP tree proof is not independently replayed"
+}
