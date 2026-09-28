@@ -11,6 +11,9 @@ Contributors must have the rights to submit code under the project license.
 
 Primary reference: https://www.gnu.org/licenses/agpl-3.0.en.html
 
+Registry owner usernames supplied by the team: **shoaibssm** on PyPI and npm.
+These are distinct from the GitHub repository owner **shoaib2000857**.
+
 ## PyPI: one-time owner setup
 
 1. Create/sign into a PyPI account with two-factor authentication.
@@ -39,7 +42,8 @@ first release, sign into your own npm account locally (do not send credentials
 in chat), then publish the reviewed source tarball:
 
 ```sh
-npm login
+npm login --registry=https://registry.npmjs.org/ --auth-type=web
+npm whoami --registry=https://registry.npmjs.org/
 npm publish /absolute/path/to/niryukti-0.2.0.tgz --access public
 ```
 
