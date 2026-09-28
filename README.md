@@ -63,7 +63,7 @@ Original project code is licensed **AGPL-3.0-only**. Covered modified redistribu
 
 ## Packages
 
-**NIRYUKTI 0.2.2 is published on [PyPI](https://pypi.org/project/niryukti/0.2.2/)**. The tested npm 0.2.2 artifact awaits account 2FA approval; [npm 0.2.1](https://www.npmjs.com/package/niryukti/v/0.2.1) remains available meanwhile. Both packages are licensed under AGPL-3.0-only. Python Linux x86_64 wheels bundle the CPU engine and native C library; the npm package builds the included C++ engine locally.
+**NIRYUKTI 0.2.2 is published on [PyPI](https://pypi.org/project/niryukti/0.2.2/) and [npm](https://www.npmjs.com/package/niryukti/v/0.2.2)**. Both packages are licensed under AGPL-3.0-only. Python Linux x86_64 wheels bundle the CPU engine and native C library; the npm package builds the included C++ engine locally.
 
 ```sh
 pip install niryukti
@@ -243,3 +243,14 @@ Prototype blockers, audit fixes and prioritized pending work: [readiness audit](
 The [frozen 0.2.1 campaign](docs/release_0_2_1_campaign.md) retains all 108 measured runs. Integer incumbent feasibility is distinct from full search-tree proof; reports preserve solver claims separately from independently established evidence.
 
 Latest source improvements and the short offline video sequence are documented in [local completion handoff](docs/local_completion_20260928.md). These checkpoint and sparse-PSD changes are included in release 0.2.2.
+
+## Complete feature reference and demonstration
+
+- [Implemented features, mathematical algorithms and mapped research references](docs/implemented_features_and_mathematics.md): current audited scope, source files, verification evidence and limits.
+- [Full project walkthrough and speaking script](docs/complete_demo_walkthrough.md): dashboard, codebase, CLI, CUDA, packages, API, reports, planning and evidence; a full 25–30-minute route and a 15-minute edit.
+- [Short recording plan](docs/demo_video_plan.md): compact presentation sequence.
+
+If your npm installation blocks lifecycle scripts, explicitly build the trusted
+installed package with `node node_modules/niryukti/install.js` before running it.
+The npm package needs a supported C++/CMake toolchain; CPU package installation
+does not automatically enable CUDA.

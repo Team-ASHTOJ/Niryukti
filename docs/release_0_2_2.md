@@ -25,7 +25,10 @@ built and passed Python wheel/source checks and the npm install/build/smoke test
 PyPI publication succeeded and public metadata exposes 0.2.2.
 The npm publishing job failed because its relative tarball path was interpreted
 as a Git package reference. The workflow path is corrected to `./npm-dist/*.tgz`.
-Local publication of the exact tested artifact requires fresh npm account 2FA.
+Local publication of the exact tested artifact completed after account 2FA.
+Public npm metadata exposes 0.2.2, and its downloaded tarball matches the tested
+SHA-256 below. A clean public PyPI install passed Python subprocess/native API,
+service and report smoke checks.
 
 Tested npm tarball SHA-256:
 `4408feb370af0438c034d305e71a7e7a7cc55a66972ed720faf03c993d4930d3`.
@@ -39,7 +42,6 @@ remains the earlier 0.2.1 source; its timings are not relabeled as 0.2.2 results
 
 ```bash
 python -m pip install --upgrade niryukti==0.2.2
-# After npm publication is approved and publicly visible:
 npm install niryukti@0.2.2
 ```
 

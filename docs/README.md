@@ -1,5 +1,15 @@
 # NIRYUKTI documentation
 
+## Start here: current implementation and full demonstration
+
+- [Complete implemented-feature and mathematics reference](implemented_features_and_mathematics.md), including mapped primary research papers, source links and exact scope.
+- [Complete demo walkthrough and speaking script](complete_demo_walkthrough.md), including dashboard, codebase, CLI, packages/API, industrial planning, verification and evidence; full and 15-minute routes.
+- [0.2.2 release evidence](release_0_2_2.md) and [latest GPU/conflict validation](gpu_presolve_bound_conflicts_20260928.md).
+
+Older dated records are historical. Use the current reference for support status;
+do not interpret an earlier “pending” note as the present implementation state.
+
+
 Start here when preparing explanations, slides, submissions, or further research.
 
 | Document | Purpose |

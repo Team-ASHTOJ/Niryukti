@@ -41,13 +41,13 @@ Infinity-norm diagonal equilibration alternately normalizes rows and columns by 
 
 ## Experimental Halpern LP method
 
-`--method halpern --no-adaptive` enables a CPU-only continuous LP experiment based on [Lu and Yang's Halpern PDHG update](https://arxiv.org/html/2407.16144v2). With epoch anchor `a` and zero-based epoch index k, it computes `z_next = (k+1)/(k+2) T(z) + a/(k+2)`. Both the anchored point and unanchored PDHG image are checked in original units. Restarts reset the anchor and k at the better verified candidate using VANTAGE's existing KKT progress/epoch-length heuristic. With `--no-restart`, the anchor stays fixed.
+`--method halpern --no-adaptive` enables a CPU/CUDA continuous LP experiment based on [Lu and Yang's Halpern PDHG update](https://arxiv.org/html/2407.16144v2). With epoch anchor `a` and zero-based epoch index k, it computes `z_next = (k+1)/(k+2) T(z) + a/(k+2)`. Both the anchored point and unanchored PDHG image are checked in original units. Restarts reset the anchor and k at the better verified candidate using VANTAGE's existing KKT progress/epoch-length heuristic. With `--no-restart`, the anchor stays fixed.
 
-The base step is `0.9/sqrt(||A||1 ||A||inf)`. Primal/dual weight uses the existing objective/RHS norm initialization and damped epoch-displacement update at restarts; the PDHG operator stays fixed within each epoch. Adaptive trial steps, CUDA, QP and MILP are rejected for this method. This is an experimental variant, not a reproduction of the paper's fixed-point restart policy, reflected variant, or theoretical rate claims. Default PDHG is unchanged as the selected method.
+The base step is `0.9/sqrt(||A||1 ||A||inf)`. Primal/dual weight uses the existing objective/RHS norm initialization and damped epoch-displacement update at restarts; the PDHG operator stays fixed within each epoch. Adaptive trial steps, QP and MILP are rejected for this method. This is an experimental variant, not a reproduction of the paper's fixed-point restart policy, reflected variant, or theoretical rate claims. Default PDHG is unchanged as the selected method.
 
 ## Restarted/reflected LP variants and polishing
 
-`rhpdhg` uses the anchored update above; `r2hpdhg` substitutes `2T(z)-z` for `T(z)` in the anchor mixture. Both monitor `sqrt(E-2C)`, the PDHG fixed-point residual in the canonical metric for VANTAGE's multiplier sign convention. Restarts use the raw image `T(z)`, reset the anchor, and may update weighting between epochs. Their sufficient/necessary/artificial rules and supported combinations are specified in [research_features.md](research_features.md). These are CPU LP experiments inspired by [cuPDLPx](https://arxiv.org/html/2507.14051v2); HPR splitting is a separate unimplemented method.
+`rhpdhg` uses the anchored update above; `r2hpdhg` substitutes `2T(z)-z` for `T(z)` in the anchor mixture. Both monitor `sqrt(E-2C)`, the PDHG fixed-point residual in the canonical metric for VANTAGE's multiplier sign convention. Restarts use the raw image `T(z)`, reset the anchor, and may update weighting between epochs. Their sufficient/necessary/artificial rules and supported combinations are specified in [research_features.md](research_features.md). These are CPU/CUDA LP experiments inspired by [cuPDLPx](https://arxiv.org/html/2507.14051v2); HPR splitting is a separate unimplemented method.
 
 The optional PID controller uses `e=log(w)+log(||dx||/||dy||)` at restarts, and updates log weight using P/I/D feedback with safeguards. Optional power iteration estimates the scaled matrix spectral norm, but never substitutes for a guaranteed bound in fixed-step methods. Adaptive acceptance remains required when the estimate is used.
 
@@ -147,3 +147,10 @@ The concurrent portfolio races supported continuous methods under cooperative lo
 A binary no-good conflict is learned only from established node infeasibility and unchanged nonbinary root bounds. The pool is capped and matches full fixed binary masks; there is no general implication graph or minimal dual-conflict analysis. Local branching adds an incumbent Hamming-ball neighborhood inside an isolated bounded search, and its bounds never become global pruning bounds.
 
 First-order checkpoints serialize actual CPU/CUDA current/average/anchor states, adaptive steps, epoch counts and host restart/PID controls. MIP checkpoints include the open frontier, bound changes, compatible warm starts/bases, incumbent, pseudocosts, cuts, conflicts and closed/unresolved bounds. Model, backend and mathematical configuration must match. Time/node/iteration budgets may extend. State files are trusted local continuation files, not externally exchangeable proofs; Simplex checkpoints also save the actual phase, basis and degeneracy count; resume refactorizes the basis. Barrier checkpoints save primal/dual/slack Newton state and the best checked candidate. Concurrent portfolios use a manifest and per-engine state files; resume restarts the race without preserving wall-clock ordering. See `local_completion_20260928.md` for validation and limitations.
+
+## Current extended implementation reference
+
+The [complete current mathematics and feature reference](implemented_features_and_mathematics.md)
+updates this document with GPU bound derivation/dual postsolve, CUDA CSR compaction,
+general bound-disjunction conflicts, integer-lattice cuts and all engine checkpoints.
+Its research-reference section distinguishes implemented adaptations from future methods.

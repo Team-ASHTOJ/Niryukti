@@ -58,3 +58,11 @@ See [certificate lifecycle, CLI/API, replay checks and limitations](../docs/cert
 Run `scripts/run_certificate_demo.sh` for an offline valid → invalid → valid demonstration.
 
 The solve form defaults to automatic device selection and the existing PDHG convergence-trace method; automatic method selection remains available in Algorithm controls. Its Auto Solver panel shows the actual backend, selected method (including the MILP relaxation method), run configuration, advisor reason, and certificate verification status.
+
+## Full project demonstration
+
+The [complete feature/math reference](../docs/implemented_features_and_mathematics.md)
+and [full speaking/recording script](../docs/complete_demo_walkthrough.md) cover the
+current 0.2.2 solver and platform. Capability text reflects GPU retained-CSR
+compaction, proof-backed continuous bounds, general bound conflicts and extended
+checkpoint state; remaining reduction/control and numerical limits stay explicit.
