@@ -1,7 +1,8 @@
 # GPU presolve, bound proofs and general conflicts — 2026-09-28
 
-This is an unreleased source update after public package 0.2.1. Build the current
-source to use it; the immutable published packages do not include these changes.
+This source update postdates public package 0.2.1 and is included in release
+0.2.2. CPU packages include the core updates; GPU paths require a CUDA source
+build. Registry publication status is recorded in [the release record](release_0_2_2.md).
 
 ## What changed
 

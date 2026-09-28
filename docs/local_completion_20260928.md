@@ -1,6 +1,6 @@
 # Local completion and recording handoff — 28 September 2026
 
-This is a bounded engineering pass on the current NVIDIA laptop. It does not convert a research prototype into a production solver. These source improvements postdate the immutable published 0.2.1 artifacts; build from this revision to use them.
+This is a bounded engineering pass on the current NVIDIA laptop. It does not convert a research prototype into a production solver. These source improvements postdate the immutable published 0.2.1 artifacts and are included in 0.2.2; see [release status](release_0_2_2.md).
 
 ## Implemented in this pass
 

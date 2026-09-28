@@ -63,7 +63,7 @@ Original project code is licensed **AGPL-3.0-only**. Covered modified redistribu
 
 ## Packages
 
-**NIRYUKTI 0.2.1 is published on [PyPI](https://pypi.org/project/niryukti/0.2.1/) and [npm](https://www.npmjs.com/package/niryukti/v/0.2.1)**. Both packages are licensed under AGPL-3.0-only. Python Linux x86_64 wheels bundle the CPU engine and native C library; the npm package builds the included C++ engine locally.
+**NIRYUKTI 0.2.2 is published on [PyPI](https://pypi.org/project/niryukti/0.2.2/)**. The tested npm 0.2.2 artifact awaits account 2FA approval; [npm 0.2.1](https://www.npmjs.com/package/niryukti/v/0.2.1) remains available meanwhile. Both packages are licensed under AGPL-3.0-only. Python Linux x86_64 wheels bundle the CPU engine and native C library; the npm package builds the included C++ engine locally.
 
 ```sh
 pip install niryukti
@@ -232,7 +232,7 @@ Run `scripts/run_certificate_demo.sh` for an offline valid → invalid → valid
 
 Current implementation and remaining work: [2026-09-28 record](docs/improvements_20260928.md).
 
-GPU restart, propagation and conflict updates: [implementation and limits](docs/gpu_conflicts_20260928.md). Latest bound-proof, GPU compaction and general-integer conflict additions: [source validation record](docs/gpu_presolve_bound_conflicts_20260928.md).
+GPU restart, propagation and conflict updates: [implementation and limits](docs/gpu_conflicts_20260928.md). Latest bound-proof, GPU compaction and general-integer conflict additions: [source validation record](docs/gpu_presolve_bound_conflicts_20260928.md). Release packaging: [0.2.2 record](docs/release_0_2_2.md).
 
 ## Automatic solver selection
 
@@ -242,4 +242,4 @@ Prototype blockers, audit fixes and prioritized pending work: [readiness audit](
 
 The [frozen 0.2.1 campaign](docs/release_0_2_1_campaign.md) retains all 108 measured runs. Integer incumbent feasibility is distinct from full search-tree proof; reports preserve solver claims separately from independently established evidence.
 
-Latest source improvements and the short offline video sequence are documented in [local completion handoff](docs/local_completion_20260928.md). These checkpoint and sparse-PSD changes postdate the published 0.2.1 packages.
+Latest source improvements and the short offline video sequence are documented in [local completion handoff](docs/local_completion_20260928.md). These checkpoint and sparse-PSD changes are included in release 0.2.2.

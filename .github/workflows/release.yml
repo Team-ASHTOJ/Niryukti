@@ -1,4 +1,4 @@
-name: Build and publish VANTAGE packages
+name: Build and publish NIRYUKTI packages
 on:
   workflow_dispatch:
     inputs:
@@ -66,4 +66,4 @@ jobs:
         with:
           name: npm-release
           path: npm-dist
-      - run: npm publish npm-dist/*.tgz --access public
+      - run: npm publish ./npm-dist/*.tgz --access public
