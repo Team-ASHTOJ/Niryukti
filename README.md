@@ -63,7 +63,7 @@ Original project code is licensed **AGPL-3.0-only**. Covered modified redistribu
 
 ## Packages
 
-**NIRYUKTI 0.2.1 is published on [PyPI](https://pypi.org/project/niryukti/0.2.1/) and [npm](https://www.npmjs.com/package/niryukti/v/0.2.1)**. Both packages are licensed under AGPL-3.0-only. Python Linux x86_64 wheels bundle the CPU engine and native C library; the npm package builds the included C++ engine locally.
+**NIRYUKTI 0.2.1 is published on [PyPI](https://pypi.org/project/niryukti/0.2.1/)**. npm accepted the tested 0.2.1 upload with HTTP 202, but public availability is not yet confirmed; [npm](https://www.npmjs.com/package/niryukti) currently exposes 0.2.0. Both packages are licensed under AGPL-3.0-only. Python Linux x86_64 wheels bundle the CPU engine and native C library; the npm package builds the included C++ engine locally.
 
 ```sh
 pip install niryukti
