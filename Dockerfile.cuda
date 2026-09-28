@@ -12,12 +12,13 @@ FROM nvidia/cuda:12.8.1-runtime-ubuntu24.04
 RUN apt-get update && apt-get install -y --no-install-recommends python3 libgomp1 libcusparse-12-8 && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/vantage
 COPY --from=build /src/build/niryukti build/niryukti
-COPY --from=build /src/build/libvantage_c.so build/libvantage_c.so
+COPY --from=build /src/build/libniryukti_c.so build/libniryukti_c.so
 COPY python python
 ENV PYTHONPATH=/opt/vantage/python
-ENV VANTAGE_BINARY=/opt/vantage/build/niryukti
-ENV VANTAGE_LIBRARY=/opt/vantage/build/libvantage_c.so
+ENV NIRYUKTI_BINARY=/opt/vantage/build/niryukti
+ENV NIRYUKTI_LIBRARY=/opt/vantage/build/libniryukti_c.so
 COPY dashboard dashboard
+COPY benchmark benchmark
 COPY examples examples
 COPY datasets datasets
 COPY docs docs

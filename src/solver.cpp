@@ -103,11 +103,51 @@ Result solve(const Model &m, const Options &o) {
 Result solve_continuous(const Model &original, const Options &o) {
     if (anchored_method(o) && (o.adaptive || original.is_qp() || original.is_mip()))
         throw std::runtime_error("Experimental Halpern supports continuous LP with --no-adaptive");
-    if (o.method == "auto" && !original.is_mip() &&
-        (!o.checkpoint_path.empty() || !o.resume_path.empty())) {
-        auto first_order = o;
-        first_order.method = "pdhg";
-        return solve_continuous(original, first_order);
+    if (o.method == "auto") {
+        auto start = Clock::now();
+        auto advice = advise_model(original, o, (original.A.value.size() + original.Q.value.size() >= 100000 || gpu_request(o) || o.cuda_graphs || o.matrix_precision == "mixed" || o.gpu_presolve || o.batch_strong_branching) ? hardware_info() : Hardware{});
+        Options selected = o;
+        selected.method = advice.method;
+        // First-order backend selection is repeated after presolve against current free memory.
+        if (advice.method != "pdhg") selected.device = advice.device;
+        bool reserve = advice.method == "simplex" || advice.method == "dual-simplex" ||
+                       advice.method == "barrier";
+        if (reserve && std::isfinite(o.time_limit))
+            selected.time_limit = .35 * o.time_limit;
+        auto first = solve_continuous(original, selected);
+        first.device_reason = "Advisor: " + advice.reason + "; " + first.device_reason;
+        bool retry = first.status == "UNSUPPORTED" || first.status == "NUMERICAL_ERROR" ||
+                     first.status == "UNKNOWN" || first.status == "TIME_LIMIT" ||
+                     first.status == "ITERATION_LIMIT";
+        if (!reserve || !retry || stop_requested(o) || elapsed(start) >= o.time_limit)
+            return first;
+        Options recovery = o;
+        recovery.method = "pdhg";
+        recovery.time_limit = std::max(0., o.time_limit - elapsed(start));
+        if (first.accuracy.finite && first.x.size() == original.c.size() &&
+            first.y.size() == original.rl.size()) {
+            recovery.initial_x = first.x;
+            recovery.initial_y = first.y;
+        }
+        auto second = solve_continuous(original, recovery);
+        auto preprocessing = first.preprocess_seconds + second.preprocess_seconds;
+        auto iterations = first.iterations + second.iterations;
+        auto iteration_time = first.iteration_seconds + second.iteration_seconds;
+        auto verification = first.verification_seconds + second.verification_seconds;
+        if (second.status != "OPTIMAL" && first.accuracy.finite &&
+            first.accuracy.kkt < second.accuracy.kkt &&
+            second.status != "INFEASIBLE" && second.status != "UNBOUNDED") {
+            first.status = second.status;
+            second = std::move(first);
+        }
+        second.preprocess_seconds = preprocessing;
+        second.iterations = iterations;
+        second.iteration_seconds = iteration_time;
+        second.verification_seconds = verification;
+        second.seconds = elapsed(start);
+        second.device_reason = "Advisor: " + advice.reason + "; recovery to PDHG; " +
+                               second.device_reason;
+        return second;
     }
     if (o.method == "concurrent")
         return solve_portfolio(original, o);
@@ -245,9 +285,8 @@ Result solve_continuous(const Model &original, const Options &o) {
         if (c2 > 1e-24 && b2 > 1e-24)
             weight = std::clamp(std::sqrt(double(c2 / b2)), 1e-4, 1e4);
     }
-    bool usecuda = gpu_request(o) || (o.device == "auto" && cuda_available() &&
-                                      (m.A.value.size() + m.Q.value.size() >= 100000 ||
-                                       o.cuda_graphs || o.matrix_precision == "mixed"));
+    auto backend_advice = advise_model(m, o, (m.A.value.size() + m.Q.value.size() >= 100000 || gpu_request(o) || o.cuda_graphs || o.matrix_precision == "mixed" || o.gpu_presolve || o.batch_strong_branching) ? hardware_info() : Hardware{});
+    bool usecuda = gpu_request(o) || backend_advice.device == gpu_backend_name();
     r.backend = usecuda ? gpu_backend_name() : "cpu";
     r.device_name = usecuda ? cuda_description() : "CPU";
     auto transfer = Clock::now();
@@ -256,7 +295,7 @@ Result solve_continuous(const Model &original, const Options &o) {
         o.device != "auto" ? "Explicit backend request"
         : usecuda
             ? "CUDA available; sparse work exceeds threshold or explicit GPU feature requested"
-            : "CPU selected: small sparse workload or CUDA unavailable";
+            : backend_advice.reason;
     std::unique_ptr<IterationBackend> backend;
     if (usecuda) {
         try {

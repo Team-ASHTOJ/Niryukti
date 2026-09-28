@@ -36,3 +36,11 @@ const char *vantage_request(vantage_session *session,const char *request) {
     catch(...) { std::snprintf(last_error,sizeof(last_error),"Native request failed"); return nullptr; }
 }
 }
+
+extern "C" {
+unsigned niryukti_abi_version(void) { return vantage_abi_version(); }
+vantage_session *niryukti_open(const char *path) { return vantage_open(path); }
+void niryukti_close(vantage_session *session) { vantage_close(session); }
+const char *niryukti_last_error(void) { return vantage_last_error(); }
+const char *niryukti_request(vantage_session *session, const char *request) { return vantage_request(session, request); }
+}

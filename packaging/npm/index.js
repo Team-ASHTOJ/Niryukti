@@ -15,7 +15,7 @@ async function solve(model, options = {}) {
       await fs.writeFile(input, JSON.stringify(model));
     }
     const output = path.join(folder, 'result.json');
-    const args = ['solve', input, '--json-out', output, '--device', options.device || 'cpu',
+    const args = ['solve', input, '--json-out', output, '--device', options.device || 'auto',
       '--method', options.method || 'auto', '--time-limit', String(options.timeLimit ?? 60),
       '--tol', String(options.tolerance ?? 1e-6), '--threads', String(options.threads ?? 1)];
     await new Promise((resolve,reject) => {
@@ -32,4 +32,4 @@ async function solve(model, options = {}) {
     return JSON.parse(await fs.readFile(output, 'utf8'));
   } finally { await fs.rm(folder, {recursive:true, force:true}); }
 }
-module.exports = {solve, executable};
+module.exports = {solve, executable, ...require('./report')};

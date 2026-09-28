@@ -21,9 +21,10 @@ def shared_library(override=None):
     explicit = override or os.environ.get("NIRYUKTI_LIBRARY") or os.environ.get("VANTAGE_LIBRARY")
     if explicit:
         return str(explicit)
-    name = "libvantage_c.dylib" if sys.platform == "darwin" else "libvantage_c.so"
+    suffix = "dylib" if sys.platform == "darwin" else "so"
+    name = "libniryukti_c." + suffix
     root = Path(__file__).resolve().parent
-    for path in (root / "_native/lib" / name, root.parents[1] / "build" / name):
+    for path in (root / "_native/lib" / name, root.parents[1] / "build" / name, root / "_native/lib" / ("libvantage_c." + suffix), root.parents[1] / "build" / ("libvantage_c." + suffix)):
         if path.is_file():
             return str(path)
     raise FileNotFoundError("Native VANTAGE library missing; install a native wheel or set VANTAGE_LIBRARY.")

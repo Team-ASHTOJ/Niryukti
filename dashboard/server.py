@@ -21,7 +21,7 @@ from urllib.parse import unquote, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / 'dashboard/static'
-BINARY = Path(os.environ.get('VANTAGE_BINARY', str(ROOT / 'build/vantage')))
+BINARY = Path(os.environ.get('NIRYUKTI_BINARY', os.environ.get('VANTAGE_BINARY', str(ROOT / 'build/niryukti'))))
 STORE = ROOT / 'results/dashboard'
 TOKEN = secrets.token_urlsafe(32)
 LOCK = threading.Lock()

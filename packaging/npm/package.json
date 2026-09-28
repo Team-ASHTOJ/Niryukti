@@ -1,6 +1,6 @@
 {
   "name": "niryukti",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Independent native sparse optimization engine for Node.js",
   "main": "index.js",
   "types": "index.d.ts",
@@ -25,7 +25,8 @@
     "native",
     "smoke.cjs",
     "LICENSE",
-    "NOTICE"
+    "NOTICE",
+    "report.js"
   ],
   "repository": {
     "type": "git",

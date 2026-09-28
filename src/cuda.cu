@@ -1087,6 +1087,16 @@ std::vector<Result> cuda_batch_relaxations(const Model &m,
     }
     return results;
 }
+Hardware hardware_info() {
+    Hardware h;
+    size_t free = 0, total = 0;
+    h.gpu_available = cuda_available();
+    if (h.gpu_available && cudaMemGetInfo(&free, &total) == cudaSuccess) {
+        h.free_gpu_bytes = double(free);
+        h.total_gpu_bytes = double(total);
+    }
+    return h;
+}
 bool cuda_available() {
     int n = 0;
     return cudaGetDeviceCount(&n) == cudaSuccess && n > 0;

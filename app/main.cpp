@@ -56,6 +56,17 @@ int main(int argc, char **argv) {
                 {"gpu_storage_estimate_bytes",
                  48. * (m.A.value.size() + m.Q.value.size()) + 240. * (m.A.rows + m.A.cols + 2)}};
             if (cmd == "explain") {
+                Options automatic; automatic.method = "auto";
+                auto hardware = hardware_info();
+                auto advisor = advise_model(m, automatic, hardware);
+                j["automatic_selection"] = {{"method", advisor.method}, {"device", advisor.device},
+                    {"reason", advisor.reason}, {"available_gpu_bytes", hardware.free_gpu_bytes},
+                    {"estimated_gpu_bytes", advisor.estimated_gpu_bytes},
+                    {"transformed_rows", advisor.transformed_rows},
+                    {"coefficient_range", advisor.coefficient_range},
+                    {"newton_fill_estimate", advisor.newton_fill_estimate},
+                    {"policy", "deterministic structural heuristic; no performance guarantee"}};
+
                 j["method"] =
                     m.is_mip() ? "Best-bound branch-and-bound using NIRYUKTI PDHG relaxations"
                     : m.is_qp()
@@ -103,8 +114,6 @@ int main(int argc, char **argv) {
                 int64_t components = 0;
                 for (size_t v = 0; v < parent.size(); ++v)
                     components += root(v) == int64_t(v);
-                bool compact = !m.is_qp() && transformed_rows <= 512;
-                bool large = m.A.value.size() + m.Q.value.size() >= 100000;
                 j["structure"] = {
                     {"integer_variables", integers},
                     {"quadratic_nonzeros", m.Q.value.size()},
@@ -113,8 +122,8 @@ int main(int argc, char **argv) {
                      "constraint and quadratic incidence; no automatic decomposition"},
                     {"transformed_row_estimate", transformed_rows}};
                 j["recommended_configuration"] = {
-                    {"method", compact ? "auto" : "pdhg"},
-                    {"device", large && !compact ? "auto" : "cpu"},
+                    {"method", advisor.method},
+                    {"device", advisor.device},
                     {"branching",
                      m.is_mip() ? "reliability (opt-in; benchmark first)" : "not applicable"}};
                 j["advisor_scope"] =
@@ -172,6 +181,7 @@ int main(int argc, char **argv) {
         if (cmd != "solve")
             throw std::runtime_error("Unknown command: " + cmd);
         Options o;
+        o.method = "auto";
         std::string output, warm, certificate_output;
         bool allow_model_change = false;
         for (int i = 3; i < argc; i++) {

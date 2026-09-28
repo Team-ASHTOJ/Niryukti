@@ -60,6 +60,17 @@ struct Options {
     std::string gpu_indices = "auto", matrix_precision = "fp64";
     std::string primal_heuristic = "repair", node_selection = "best-bound";
 };
+struct Hardware {
+    bool gpu_available = false;
+    double free_gpu_bytes = 0, total_gpu_bytes = 0;
+};
+struct Advice {
+    std::string method, device, reason;
+    int64_t nonzeros = 0, transformed_rows = 0, integer_variables = 0;
+    double estimated_gpu_bytes = 0, coefficient_range = 1, newton_fill_estimate = 0;
+};
+Hardware hardware_info();
+Advice advise_model(const Model &, const Options &, const Hardware &);
 struct Accuracy {
     double objective = inf, primal = inf, dual = inf, gap = inf, kkt = inf, integrality = inf;
     double primal_absolute = inf, dual_absolute = inf, complementarity = inf, lower_bound = -inf;

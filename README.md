@@ -2,9 +2,53 @@
 
 **Independent Sparse Optimization Engine**
 
-An independent sparse optimization engine for SIH26119, built in C++20 with an optional CUDA backend. The first prototype solves LPs, supported sparse convex QPs, small MILPs and convex MIQPs using its own numerical algorithms. No existing optimization solver is used to solve a NIRYUKTI model.
+An independent sparse optimization engine built in C++20 with an optional CUDA backend. The first prototype solves LPs, supported sparse convex QPs, small MILPs and convex MIQPs using its own numerical algorithms. No existing optimization solver is used to solve a NIRYUKTI model.
 
 **Research prototype:** numerical correctness is tested on representative cases; industrial robustness, unrestricted large sparse PSD validation, and competitive large-scale MILP performance remain development work. The name does not imply support for general nonconvex global optimization.
+
+## Automatic solver selection
+
+`niryukti solve model.mps --method auto --device auto --json-out result.json`
+uses model structure, available GPU memory and requested controls to select a
+supported algorithm and backend. Compact CPU LPs can use simplex; suitable small
+coupled QPs can use the experimental barrier; large sparse models use PDHG.
+Numerical failures can fall back to verified PDHG within the remaining budget.
+`niryukti explain model.mps` describes the selection policy. Explicit
+method/device flags remain available. Selection is a rule-based policy, not a
+promise that the chosen method is fastest on every instance.
+
+## API service and reports
+
+The Python package includes an authenticated local HTTP API and offline HTML
+reports; the Node package also exports `renderReport` and a report CLI.
+
+```bash
+export NIRYUKTI_API_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+niryukti serve --host 127.0.0.1 --port 8090
+# In another terminal, after solving a model:
+niryukti report result.json --output report.html
+```
+
+Routes: `GET /v1/health`, `POST /v1/solve`, and `POST /v1/report`. Authentication,
+request size, concurrency and time limits are enforced. See [API examples and
+limits](docs/api.md). A report displays saved results; independently verify the
+solution before treating it as certified. These additions are in the current
+source; the previously published 0.2.0 packages do not include them.
+
+## Validate another NVIDIA laptop
+
+```bash
+./scripts/validate_cuda_laptop.sh
+# Also test the standard NVIDIA Docker runtime:
+./scripts/validate_cuda_laptop.sh --docker
+```
+
+Requires CMake, a C++20 compiler, Python, CUDA toolkit and an NVIDIA GPU. The
+script builds, runs correctness tests, solves CPU/CUDA/auto examples, verifies
+results and saves logs, hardware details and checksums under `results/laptop-*`.
+It does not install drivers or change system configuration. Docker GPU tests
+require a working NVIDIA Container Toolkit. Passing here does not replace
+validation on a second physical laptop.
 
 ## Dashboard
 
@@ -181,3 +225,5 @@ docker run --gpus all --rm vantage:cuda devices
 Dockerfiles provide reproducible build recipes; image validation and actual measured campaigns are recorded separately. `auto` selects compact CPU simplex where supported; otherwise it retains PDHG. Root cuts and new CUDA monitoring remain opt-in. First-order/tree checkpoints, experimental barrier/dual simplex, batched branching probes and restricted binary conflicts are now implemented and tested. Their limitations and hardware-validation boundaries are documented in the completion record; AMD remains deferred.
 
 Current completion-round implementation, usage, trust boundaries and hardware validation: [solver completion record](docs/solver_completion_20260927.md).
+
+Current implementation and remaining work: [2026-09-28 record](docs/improvements_20260928.md).
