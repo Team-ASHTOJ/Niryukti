@@ -32,8 +32,7 @@ niryukti report result.json --output report.html
 Routes: `GET /v1/health`, `POST /v1/solve`, and `POST /v1/report`. Authentication,
 request size, concurrency and time limits are enforced. See [API examples and
 limits](docs/api.md). A report displays saved results; independently verify the
-solution before treating it as certified. These additions are in the current
-source; the previously published 0.2.0 packages do not include them.
+solution before treating it as certified. These additions are included in Python release 0.2.1.
 
 ## Validate another NVIDIA laptop
 
@@ -64,7 +63,7 @@ Original project code is licensed **AGPL-3.0-only**. Covered modified redistribu
 
 ## Packages
 
-**NIRYUKTI 0.2.0 is published on [PyPI](https://pypi.org/project/niryukti/) and [npm](https://www.npmjs.com/package/niryukti)** under AGPL-3.0-only. Python Linux x86_64 wheels bundle the CPU engine and native C library; the npm package builds the included C++ engine locally.
+**NIRYUKTI 0.2.1 is published on [PyPI](https://pypi.org/project/niryukti/0.2.1/)**. The npm 0.2.1 artifact has passed release smoke tests and is awaiting the registry account approval; [npm](https://www.npmjs.com/package/niryukti) currently serves 0.2.0. Both packages are licensed under AGPL-3.0-only. Python Linux x86_64 wheels bundle the CPU engine and native C library; the npm package builds the included C++ engine locally.
 
 ```sh
 pip install niryukti
@@ -240,3 +239,5 @@ GPU restart, propagation and conflict updates: [implementation and limits](docs/
 Use `niryukti solve model.mps --auto` or `niryukti solve model.mps --auto --dry-run` to inspect the same structural policy used by solves. See [Auto Solver policy, configuration, and benchmark instructions](docs/auto_solver.md).
 
 Prototype blockers, audit fixes and prioritized pending work: [readiness audit](docs/prototype_readiness_20260928.md).
+
+The [frozen 0.2.1 campaign](docs/release_0_2_1_campaign.md) retains all 108 measured runs. Integer incumbent feasibility is distinct from full search-tree proof; reports preserve solver claims separately from independently established evidence.
