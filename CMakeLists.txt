@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(NIRYUKTI VERSION 0.2.1 LANGUAGES CXX)
+project(NIRYUKTI VERSION 0.2.2 LANGUAGES CXX)
 # Preferred public spelling; existing build scripts retain their legacy options.
 foreach(feature CUDA OPENMP SPARSE_LU SANITIZE)
  if(DEFINED NIRYUKTI_${feature})

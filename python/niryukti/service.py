@@ -5,7 +5,7 @@ import os
 import math
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from . import Model
+from . import Model, __version__
 from .report import render_report
 
 def make_server(host="127.0.0.1", port=8090, *, token=None, workers=2, max_time=300):
@@ -36,7 +36,7 @@ def make_server(host="127.0.0.1", port=8090, *, token=None, workers=2, max_time=
         def do_GET(self):
             if not self.authorized(): return
             if self.path != "/v1/health": return self.send(404, {"error":"Unknown route"})
-            self.send(200, {"service":"NIRYUKTI", "version":"0.2.1", "mode":"synchronous", "max_parallel_solves":workers})
+            self.send(200, {"service":"NIRYUKTI", "version":__version__, "mode":"synchronous", "max_parallel_solves":workers})
         def do_POST(self):
             if not self.authorized(): return
             if self.path not in ("/v1/solve", "/v1/report"):

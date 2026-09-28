@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "niryukti"
-version = "0.2.1"
+version = "0.2.2"
 description = "Independent sparse LP, convex QP and mixed-integer optimization engine"
 readme = "packaging/README.md"
 requires-python = ">=3.10"

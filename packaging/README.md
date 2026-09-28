@@ -78,3 +78,15 @@ AGPL-3.0-only for original project code, with third-party notices retained.
 Copying and commercial use are permitted under the license terms. Covered
 modified distributions retain AGPL; modified network deployments must offer
 corresponding source to users. See the bundled LICENSE and NOTICE.
+
+## Version 0.2.2
+
+Adds checkpoint/resume for simplex, barrier and concurrent portfolios, guarded
+sparse singular-PSD ordering, general-integer bound conflicts and integer-lattice
+cuts. CUDA source builds also include continuous bound derivation replay, dual
+reconstruction and GPU CSR compaction. CPU distributions include the same
+mathematical core, but require a separate CUDA build for GPU execution.
+
+Integer incumbent verification is distinct from replaying a full search-tree
+proof. Large/difficult PSD recognition, general dual conflict analysis and direct
+GPU barrier factorization remain restricted. No universal speedup is claimed.
