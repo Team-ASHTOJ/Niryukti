@@ -28,8 +28,10 @@ remains active there.
 
 ### Prototype readiness tasks
 
-1. **Verify the final GitHub matrix and distribution smoke jobs.** Do not equate
-   a locally passing build with a successful portable registry build.
+1. **Maintain green CI and distribution smoke jobs.** The GitHub CPU matrix
+   for commit `734adfb` passed both sanitizer OFF and ON (run `36397746913`).
+   Distribution smoke results are recorded below; a local build alone is not
+   portable-registry evidence.
 2. **Publish tested 0.2.1 Python/npm packages.** Public 0.2.0 predates the API,
    reports, and latest advisor changes. Keep examples/version claims aligned.
    Publishing is separate from build-only CI; npm trusted-publisher setup may
@@ -41,7 +43,8 @@ remains active there.
 4. **Freeze an honest numerical demo campaign.** E226 and the large refinery LP
    fail 1e-6 verification within the friend's recorded five-second campaign.
    That is a convergence/performance limitation under that budget, not evidence
-   that every solve fails. Establish verified outcomes with realistic limits and
+   that every solve fails. The follow-up E226 solve below reached verified
+   optimality after raising the iteration cap. Establish outcomes with realistic limits and
    retain explicit failures. No blanket competitiveness claim versus HiGHS.
 5. **Maintain the distinction between MIP solver status and replayable proof.**
    The standalone certificate can verify incumbents and available relaxation
@@ -83,3 +86,33 @@ HTTP API, CLI, reports, dashboard, packages and validation scripts. It is not a
 finished commercial solver. The items above separate evidence/release tasks from
 research algorithms, so prototype submission need not depend on claiming that
 all future research work is complete.
+
+
+## Follow-up evidence
+
+- Local CPU: 15,189 research assertions; CUDA RTX 4060: 16,382 research
+  assertions. All CTest/CLI/Python/API/dashboard/certificate/conflict checks passed.
+- Headless Chrome browser check passed desktop/mobile navigation, search,
+  details, live solve, import and download with no page errors. The local browser
+  installation remains present despite untracking generated dependencies.
+- E226 with `--method auto --device cpu --threads 1 --time-limit 15` and the
+  default 100,000-iteration cap returned ITERATION_LIMIT with KKT approximately
+  1.61e-4. With `--time-limit 30 --iterations 1000000`, the same current solver
+  returned OPTIMAL with KKT 9.701436868e-7 after 170,241 total iterations.
+  Standalone verification returned VERIFIED_OPTIMAL. This is one local numerical
+  recovery test, not evidence of baseline speed superiority.
+
+```bash
+./build/niryukti solve datasets/e226.mps --method auto --device cpu \
+  --threads 1 --time-limit 30 --iterations 1000000 --json-out e226-result.json
+./build/niryukti verify datasets/e226.mps e226-result.json
+```
+
+Raw local audit logs and model-result verification are retained under
+`results/prototype_audit_20260928/` (ignored run artifacts).
+
+GitHub distribution smoke run `36397747006` on `734adfb` also passed: wheel
+build/metadata check, clean installation, subprocess/native APIs, API/report
+imports and npm source installation/smoke tests. The CI failures described above
+are resolved for this code revision. This build/install validation did not
+publish a new registry release.
