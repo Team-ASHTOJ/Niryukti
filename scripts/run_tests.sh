@@ -15,7 +15,7 @@ esac
 # the native-library leak oracle, so disable leak reporting for these hosts.
 asan_runtime=""
 if command -v ldd >/dev/null 2>&1; then
-    asan_runtime=$(ldd "${1:-build}/libniryukti_c.$native_suffix" 2>/dev/null |         rg -o '/[^ ]*libasan[^ ]*' | head -n 1 || true)
+    asan_runtime=$(ldd "${1:-build}/libniryukti_c.$native_suffix" 2>/dev/null |         awk '/libasan.*=>/ {print $3; exit}' || true)
 fi
 native_python() {
     if [[ -n "$asan_runtime" ]]; then
