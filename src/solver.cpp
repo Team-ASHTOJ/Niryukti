@@ -14,9 +14,45 @@ bool anchored_method(const Options &o) {
 }
 } // namespace
 volatile std::sig_atomic_t interrupted = 0;
+void validate_options(const Options &o) {
+    if (!(o.tol > 0 && o.tol < 1) || !std::isfinite(o.tol) || o.iteration_limit < 0 ||
+        o.node_limit < 0 || o.time_limit < 0 || std::isnan(o.time_limit) || o.check_every < 1 ||
+        o.scaling_passes < 0 || o.scaling_passes > 20 || o.threads < 1 || o.mip_gap < 0 ||
+        !std::isfinite(o.mip_gap) || !std::isfinite(o.integer_tol) || o.integer_tol <= 0 ||
+        o.integer_tol >= .5 || o.power_iterations < 0 || o.power_iterations > 1000)
+        throw std::runtime_error("Invalid solver options");
+    if (o.device != "auto" && o.device != "cpu" && o.device != "cuda" && o.device != "hip")
+        throw std::runtime_error("Unknown device");
+    if (o.method != "pdhg" && o.method != "simplex" && o.method != "auto" &&
+        o.method != "barrier" && o.method != "concurrent" && o.method != "dual-simplex" &&
+        !anchored_method(o))
+        throw std::runtime_error("Unknown method: use pdhg, halpern, rhpdhg or r2hpdhg");
+    if (o.primal_weight != "displacement" && o.primal_weight != "pid")
+        throw std::runtime_error("Unknown primal weight controller");
+    if (o.primal_heuristic != "repair" && o.primal_heuristic != "pump" &&
+        o.primal_heuristic != "rins" && o.primal_heuristic != "local" &&
+        o.primal_heuristic != "all")
+        throw std::runtime_error("Unknown primal heuristic");
+    if (o.scaling != "ruiz" && o.scaling != "combined")
+        throw std::runtime_error("Unknown scaling: use ruiz or combined");
+    if (o.node_selection != "best-bound" && o.node_selection != "depth-first" &&
+        o.node_selection != "best-estimate")
+        throw std::runtime_error("Unknown node selection policy");
+    if (o.branching != "fractional" && o.branching != "reliability")
+        throw std::runtime_error("Unknown branching: use fractional or reliability");
+    if (o.gpu_indices != "auto" && o.gpu_indices != "32" && o.gpu_indices != "64")
+        throw std::runtime_error("GPU indices must be auto, 32 or 64");
+    if (o.matrix_precision != "fp64" && o.matrix_precision != "mixed")
+        throw std::runtime_error("Matrix precision must be fp64 or mixed");
+    if ((o.cuda_graphs || o.matrix_precision == "mixed") && o.device == "cpu")
+        throw std::runtime_error("CUDA graphs and mixed matrix precision require a CUDA backend");
+    if (anchored_method(o) && o.matrix_precision == "mixed")
+        throw std::runtime_error("Fixed Halpern operators require FP64 matrices");
+}
 Result solve(const Model &m, const Options &o) {
     auto overall_start = Clock::now();
     m.validate();
+    validate_options(o);
     if (o.gpu_presolve && (o.device == "cpu" || !cuda_available()))
         throw std::runtime_error("GPU bound propagation requires an available CUDA backend");
     if (o.batch_strong_branching && (o.device == "cpu" || !cuda_available() || m.is_qp() ||
@@ -28,49 +64,16 @@ Result solve(const Model &m, const Options &o) {
     if ((!o.checkpoint_path.empty() || !o.resume_path.empty()) && !m.is_mip() &&
         o.method != "auto" && o.method != "pdhg" && !anchored_method(o))
         throw std::runtime_error("Continuous checkpoint/resume requires a first-order method");
-    if (!(o.tol > 0 && o.tol < 1) || !std::isfinite(o.tol) || o.iteration_limit < 0 ||
-        o.node_limit < 0 || o.time_limit < 0 || std::isnan(o.time_limit) || o.check_every < 1 ||
-        o.scaling_passes < 0 || o.scaling_passes > 20 || o.threads < 1 || o.mip_gap < 0 ||
-        !std::isfinite(o.mip_gap) || !std::isfinite(o.integer_tol) || o.integer_tol <= 0 ||
-        o.integer_tol >= .5 || o.power_iterations < 0 || o.power_iterations > 1000)
-        throw std::runtime_error("Invalid solver options");
-    if (o.device != "auto" && o.device != "cpu" && o.device != "cuda" && o.device != "hip")
-        throw std::runtime_error("Unknown device");
     if (gpu_request(o) && o.device != gpu_backend_name()) {
         Result r;
         r.status = "UNSUPPORTED";
         r.message = "Requested GPU backend not compiled: " + o.device;
         return r;
     }
-    if (o.method != "pdhg" && o.method != "simplex" && o.method != "auto" &&
-        o.method != "barrier" && o.method != "concurrent" && o.method != "dual-simplex" &&
-        !anchored_method(o))
-        throw std::runtime_error("Unknown method: use pdhg, halpern, rhpdhg or r2hpdhg");
-    if (o.primal_weight != "displacement" && o.primal_weight != "pid")
-        throw std::runtime_error("Unknown primal weight controller");
-    if (o.primal_heuristic != "repair" && o.primal_heuristic != "pump" &&
-        o.primal_heuristic != "rins" && o.primal_heuristic != "local" &&
-        o.primal_heuristic != "all")
-        throw std::runtime_error("Unknown primal heuristic");
     if (o.polishing && m.is_qp())
         throw std::runtime_error("Feasibility polishing currently requires LP relaxations");
-    if (o.scaling != "ruiz" && o.scaling != "combined")
-        throw std::runtime_error("Unknown scaling: use ruiz or combined");
-    if (o.node_selection != "best-bound" && o.node_selection != "depth-first" &&
-        o.node_selection != "best-estimate")
-        throw std::runtime_error("Unknown node selection policy");
-    if (o.branching != "fractional" && o.branching != "reliability")
-        throw std::runtime_error("Unknown branching: use fractional or reliability");
     if (anchored_method(o) && (o.adaptive || m.is_qp() || m.is_mip()))
         throw std::runtime_error("Experimental Halpern supports continuous LP with --no-adaptive");
-    if (o.gpu_indices != "auto" && o.gpu_indices != "32" && o.gpu_indices != "64")
-        throw std::runtime_error("GPU indices must be auto, 32 or 64");
-    if (o.matrix_precision != "fp64" && o.matrix_precision != "mixed")
-        throw std::runtime_error("Matrix precision must be fp64 or mixed");
-    if ((o.cuda_graphs || o.matrix_precision == "mixed") && o.device == "cpu")
-        throw std::runtime_error("CUDA graphs and mixed matrix precision require a CUDA backend");
-    if (anchored_method(o) && o.matrix_precision == "mixed")
-        throw std::runtime_error("Fixed Halpern operators require FP64 matrices");
     if (!o.initial_x.empty() && o.initial_x.size() != m.c.size())
         throw std::runtime_error("Warm-start primal dimension mismatch");
     if (!o.initial_y.empty() && o.initial_y.size() != m.rl.size())

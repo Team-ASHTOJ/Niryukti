@@ -2,7 +2,7 @@
 import hmac
 import json
 import os
-import secrets
+import math
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from . import Model
@@ -14,6 +14,10 @@ def make_server(host="127.0.0.1", port=8090, *, token=None, workers=2, max_time=
         raise ValueError("Set NIRYUKTI_API_TOKEN before starting the API service")
     if workers < 1 or workers > 16 or not (0 < max_time <= 3600):
         raise ValueError("Invalid API resource limits")
+    def finite_float(value):
+        number = float(value)
+        if not math.isfinite(number): raise ValueError("Nonfinite JSON number")
+        return number
     capacity = threading.BoundedSemaphore(workers)
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -26,7 +30,7 @@ def make_server(host="127.0.0.1", port=8090, *, token=None, workers=2, max_time=
             try: self.wfile.write(body)
             except (BrokenPipeError, ConnectionResetError): pass
         def authorized(self):
-            if not hmac.compare_digest(self.headers.get("Authorization", ""), "Bearer " + token):
+            if not hmac.compare_digest(self.headers.get("Authorization", "").encode("utf-8"), ("Bearer " + token).encode("utf-8")):
                 self.send(401, {"error":"Bearer token required"}); return False
             return True
         def do_GET(self):
@@ -42,7 +46,7 @@ def make_server(host="127.0.0.1", port=8090, *, token=None, workers=2, max_time=
                 if not 0 < length <= 8 * 1024 * 1024:
                     return self.send(413, {"error":"JSON payload limit: 8 MiB"})
                 self.connection.settimeout(30)
-                data = json.loads(self.rfile.read(length), parse_constant=lambda v: (_ for _ in ()).throw(ValueError("Nonfinite JSON")))
+                data = json.loads(self.rfile.read(length), parse_float=finite_float, parse_constant=lambda v: (_ for _ in ()).throw(ValueError("Nonfinite JSON")))
                 if not isinstance(data, dict): raise ValueError("Expected JSON object")
                 if self.path == "/v1/report":
                     if set(data) - {"result","title"}: raise ValueError("Unknown report fields")
@@ -63,7 +67,7 @@ def make_server(host="127.0.0.1", port=8090, *, token=None, workers=2, max_time=
                     result = model.solve(**options)
                     self.send(200, result)  # Limit/unsupported outcomes retain their solver status.
                 finally: capacity.release()
-            except (ValueError, TypeError, KeyError, RuntimeError, OSError) as error:
+            except (ValueError, TypeError, OverflowError, KeyError, RuntimeError, OSError) as error:
                 self.send(400, {"error":str(error)[:2048]})
     server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True

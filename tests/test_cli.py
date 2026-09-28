@@ -15,6 +15,14 @@ def run(*args):return subprocess.run([binary,*map(str,args)],text=True,capture_o
 with tempfile.TemporaryDirectory(prefix='vantage-cli-tests-') as tmp:
     tmp=Path(tmp);sol=tmp/'solution.json'
     qplib=tmp/'parsed.json'
+    # Advisory output must reject the same invalid option domains as real solves.
+    for args in [('analyze', '--tol', 'nan'), ('analyze', '--time-limit', '-1'),
+                 ('analyze', '--scaling', 'bogus'), ('solve', '--method', 'bogus'),
+                 ('solve', '--threads', '0')]:
+        cmd, *flags = args
+        if cmd == 'solve': flags.append('--dry-run')
+        bad = run(cmd, root/'examples/toy.lp', *flags)
+        assert bad.returncode != 0, (args, bad.stdout)
     # Auto dry-run and analyze expose deterministic, machine-readable choices.
     analysis=run('analyze',root/'examples/toy.lp','--device','cpu')
     assert analysis.returncode==0,analysis.stderr

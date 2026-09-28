@@ -1,8 +1,14 @@
 name: Distribution smoke tests
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['pyproject.toml', 'packaging/**', 'python/**', 'CMakeLists.txt', 'src/**', 'include/**', 'app/**', 'tests/packaging/**', 'scripts/package_npm.py', '.github/workflows/packages.yml']
   pull_request:
-    paths: ['pyproject.toml', 'packaging/**', 'python/**', 'CMakeLists.txt', 'src/**', '.github/workflows/packages.yml']
+    paths: ['pyproject.toml', 'packaging/**', 'python/**', 'CMakeLists.txt', 'src/**', 'include/**', 'app/**', 'tests/packaging/**', 'scripts/package_npm.py', '.github/workflows/packages.yml']
+concurrency:
+  group: distributions-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   linux:
     runs-on: ubuntu-latest

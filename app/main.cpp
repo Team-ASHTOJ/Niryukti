@@ -8,6 +8,7 @@
 using namespace vantage;
 namespace {
 nlohmann::json analyze_model(const Model &m, const Options &o) {
+    validate_options(o);
     auto hardware = hardware_info();
     auto advice = advise_model(m, o, hardware);
     int64_t binary = 0, integer = 0, bounded = 0, fixed = 0;

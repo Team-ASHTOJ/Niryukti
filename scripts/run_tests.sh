@@ -14,12 +14,15 @@ esac
 # tests above retain their normal leak checks. CPython allocations are outside
 # the native-library leak oracle, so disable leak reporting for these hosts.
 asan_runtime=""
+cxx_runtime=""
 if command -v ldd >/dev/null 2>&1; then
     asan_runtime=$(ldd "${1:-build}/libniryukti_c.$native_suffix" 2>/dev/null |         awk '/libasan.*=>/ {print $3; exit}' || true)
+    cxx_runtime=$(ldd "${1:-build}/libniryukti_c.$native_suffix" 2>/dev/null | \
+        awk '/libstdc[+][+].*=>/ {print $3; exit}' || true)
 fi
 native_python() {
     if [[ -n "$asan_runtime" ]]; then
-        LD_PRELOAD="$asan_runtime${LD_PRELOAD:+:$LD_PRELOAD}"             ASAN_OPTIONS="${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0" python3 "$@"
+        LD_PRELOAD="$asan_runtime${cxx_runtime:+:$cxx_runtime}${LD_PRELOAD:+:$LD_PRELOAD}"             ASAN_OPTIONS="${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0" python3 "$@"
     else
         python3 "$@"
     fi

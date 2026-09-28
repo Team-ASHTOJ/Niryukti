@@ -123,6 +123,7 @@ std::string certificate_json(const Model &, const Result &, const Options & = {}
 std::string verify_certificate_json(const Model &, const std::string &);
 std::string certificate_fingerprint(const Model &);
 Accuracy verify(const Model &, const std::vector<double> &x, const std::vector<double> &y);
+void validate_options(const Options &);
 Result solve(const Model &, const Options & = {});
 Result solve_continuous(const Model &, const Options &);
 Result solve_mip(const Model &, const Options &);

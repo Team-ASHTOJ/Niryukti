@@ -599,6 +599,8 @@ void completion_regressions() {
         portfolio.device = "cpu";
         auto raced = solve(lp, portfolio);
         require(raced.status == "OPTIMAL", "concurrent LP portfolio verifies winner");
+        require(raced.message.find("1 portfolio engines") != std::string::npos,
+                "one-thread portfolio does not oversubscribe engines");
         near(raced.accuracy.objective, -14, 1e-6);
         portfolio.cancellation = std::make_shared<std::atomic<bool>>(true);
         auto stopped = solve(lp, portfolio);

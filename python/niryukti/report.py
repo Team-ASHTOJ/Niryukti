@@ -16,7 +16,8 @@ def render_report(result, *, title="NIRYUKTI solve report"):
                          for k, v in fields.items() if k not in ("primal", "dual"))
         if values:
             rows.append("<section><h2>" + html.escape(section.title()) + "</h2><table>" + values + "</table></section>")
-    objective = result.get("objective", result.get("accuracy", {}).get("objective"))
+    accuracy = result.get("accuracy", {})
+    objective = result.get("objective", accuracy.get("objective") if isinstance(accuracy, dict) else None)
     return '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>''' + html.escape(title) + '''</title><style>
 body{background:#f4f1e9;color:#242821;font:16px/1.6 system-ui;margin:0}main{max-width:1100px;margin:auto;padding:40px 24px}

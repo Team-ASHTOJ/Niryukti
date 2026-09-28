@@ -40,6 +40,16 @@ class ServiceTests(unittest.TestCase):
   for options in ({'binary':'/bin/sh'},{'time_limit':99999}):
    with self.assertRaises(urllib.error.HTTPError) as error:self.request('/v1/solve',{'model':{},'options':options})
    self.assertEqual(error.exception.code,400)
+ def test_malformed_headers_and_numeric_overflow(self):
+  req=urllib.request.Request(self.url+'/v1/health',headers={'Authorization':'Bearer é'})
+  with self.assertRaises(urllib.error.HTTPError) as error:urllib.request.urlopen(req)
+  self.assertEqual(error.exception.code,401)
+  req=urllib.request.Request(self.url+'/v1/solve',data=b'{"model":{},"options":{"threads":1e999}}',
+                            headers={'Authorization':'Bearer local-test-token','Content-Type':'application/json'})
+  with self.assertRaises(urllib.error.HTTPError) as error:urllib.request.urlopen(req)
+  self.assertEqual(error.exception.code,400)
+  self.assertEqual(json.load(self.request('/v1/health'))['service'],'NIRYUKTI')
+  self.assertIn('TIME_LIMIT',render_report({'status':'TIME_LIMIT','accuracy':None}))
  def test_report_file_and_invalid_input(self):
   with self.assertRaises(ValueError):render_report({})
   with tempfile.TemporaryDirectory() as d:

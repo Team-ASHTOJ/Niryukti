@@ -238,3 +238,5 @@ GPU restart, propagation and conflict updates: [implementation and limits](docs/
 ## Automatic solver selection
 
 Use `niryukti solve model.mps --auto` or `niryukti solve model.mps --auto --dry-run` to inspect the same structural policy used by solves. See [Auto Solver policy, configuration, and benchmark instructions](docs/auto_solver.md).
+
+Prototype blockers, audit fixes and prioritized pending work: [readiness audit](docs/prototype_readiness_20260928.md).
