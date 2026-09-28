@@ -28,7 +28,7 @@ as a Git package reference. The workflow path is corrected to `./npm-dist/*.tgz`
 Local publication of the exact tested artifact completed after account 2FA.
 Public npm metadata exposes 0.2.2, and its downloaded tarball matches the tested
 SHA-256 below. A clean public PyPI install passed Python subprocess/native API,
-service and report smoke checks.
+service and report smoke checks. A clean public npm installation also passed native build, solve, invalid-input and cancellation checks after explicitly running its trusted install script.
 
 Tested npm tarball SHA-256:
 `4408feb370af0438c034d305e71a7e7a7cc55a66972ed720faf03c993d4930d3`.

@@ -180,7 +180,7 @@ and time, then download the comparison. If a baseline is unavailable, say so.
 
 ```bash
 ./build/niryukti devices
-./build/niryukti analyze examples/refinery.json --auto --dry-run
+./build/niryukti analyze examples/refinery.json --auto
 ./build/niryukti solve examples/refinery.json --device cuda --method pdhg \
   --gpu-presolve --gpu-monitor --cuda-graphs --iterations 1000000 \
   --time-limit 30 --json-out results/full-video/refinery-gpu.json
