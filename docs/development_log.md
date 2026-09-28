@@ -112,3 +112,7 @@ Adopted AGPL-3.0-only for original code at the user’s request to keep covered 
 ## 2026-09-28 — public NIRYUKTI distribution names
 
 Renamed PyPI/npm distributions and installed CLI to `niryukti`; added `niryukti` Python imports with legacy implementation compatibility. The native CLI now builds as `niryukti`, retaining a developer-only `vantage` copy for existing scripts. Publisher configuration must use the PyPI/npm project name `niryukti`, not the earlier provisional name.
+
+## 2026-09-28 — public package release
+
+Published `niryukti` 0.2.0 on PyPI via GitHub OIDC and on npm after the owner completed browser 2FA approval. Public registry installations passed Python CLI/subprocess/native and Node source-build/solve/error/cancellation checks; registry checksums matched retained artifacts. Recorded limits: initial prebuilt Python wheels are Linux x86_64 CPU, npm requires a compiler, CUDA remains a separately built backend, and future npm OIDC configuration is still an owner-side step. See [release evidence](release_20260928.md).

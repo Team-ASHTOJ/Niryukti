@@ -1,4 +1,4 @@
-# VANTAGE distribution
+# NIRYUKTI distribution
 
 `niryukti` packages the independently implemented C++ optimization engine.
 Python wheels contain the CPU executable and native C ABI library; no existing
@@ -24,7 +24,8 @@ modified network deployments must offer corresponding source to their users.
 Copying and commercial use remain permitted. Third-party licenses are retained.
 See LICENSE and NOTICE in each distribution.
 
-Registry publication needs account ownership and trusted-publisher setup. Only
+Version 0.2.0 is published on PyPI and npm. `pip install niryukti` installs
+the Python package; `npm install niryukti` installs the Node source package. Only
 tested host platforms should be advertised. The release workflow builds repaired
 manylinux x86_64 wheels plus a corresponding-source tarball; other platforms may
 build from source. CUDA builds are not bundled in the initial CPU release.

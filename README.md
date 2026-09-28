@@ -20,7 +20,16 @@ Original project code is licensed **AGPL-3.0-only**. Covered modified redistribu
 
 ## Packages
 
-Python wheels now bundle the CPU engine and native C library; the npm source package builds the engine locally. These are tested local distributions, not published registry packages yet. See [build/install instructions](packaging/README.md) and [release gates and validation](docs/distribution_20260928.md). Docker recipes include both CLI and Python/native APIs.
+**NIRYUKTI 0.2.0 is published on [PyPI](https://pypi.org/project/niryukti/) and [npm](https://www.npmjs.com/package/niryukti)** under AGPL-3.0-only. Python Linux x86_64 wheels bundle the CPU engine and native C library; the npm package builds the included C++ engine locally.
+
+```sh
+pip install niryukti
+niryukti devices
+# Node.js: requires CMake 3.24+ and a C++20 compiler
+npm install niryukti
+```
+
+Python: `from niryukti import Model, NativeSession`. Node.js: `const {solve} = require("niryukti")`. Source installs require a compiler; CUDA remains available through a separately built engine. See [build/install instructions](packaging/README.md), [public release verification](docs/release_20260928.md), and [publisher setup](docs/publishing.md). Docker recipes include both CLI and Python/native APIs.
 
 ## Run it
 

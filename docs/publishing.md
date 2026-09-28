@@ -38,8 +38,8 @@ https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/
 ## npm: first publication and subsequent OIDC setup
 
 npm trusted-publisher configuration is attached to an existing package. For the
-first release, sign into your own npm account locally (do not send credentials
-in chat), then publish the reviewed source tarball:
+first release, enable account 2FA/passkey and sign into your own npm account
+locally (do not send credentials in chat), then publish the reviewed source tarball:
 
 ```sh
 npm login --registry=https://registry.npmjs.org/ --auth-type=web
