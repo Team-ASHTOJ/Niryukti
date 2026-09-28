@@ -27,7 +27,21 @@ CPU and CUDA full suites passed, including CLI/Python API, certificates, MIP con
 
 Public npm 0.2.1 metadata is visible, and its tarball SHA-256 matches the CI-tested artifact. Native JSON/certificate version fields were found to still report hardcoded 0.2.0; source now derives these from the CMake project version instead.
 
+The updated CPU Docker image `niryukti:demo-cpu` built with passing CTest checks and solved the refinery case to verified OPTIMAL (KKT 1.38e-14). The explicit CUDA recording solve reached OPTIMAL with original-space KKT 2.46e-8. These are correctness demonstrations, not speedup claims.
+
 A normal `--gpus all` container attempt failed with `failed to discover GPU vendor from CDI: no known GPU vendor found`. No host daemon configuration was changed. The machine needs NVIDIA Container Toolkit/CDI setup before that validation can pass.
+
+The updated `build/niryukti` workspace binary is ready. AddressSanitizer/UndefinedBehaviorSanitizer CTest and checkpoint/SIGINT tests passed. The first sanitizer attempt could not start because this session preloaded `/usr/lib/coreutils/libstdbuf.so` before ASan; rerunning tests with only that inherited preload removed passed. No sanitizer instrumentation was disabled.
+
+The generated 1,200-variable singular QP solved to its known objective `-599.5` in 100 iterations on CPU and CUDA, with independently checked KKT 7.11e-15. Reproduce this synthetic correctness case with:
+
+```sh
+python3 examples/generate_singular_qp.py --variables 1200 --output results/singular.json
+./build/niryukti solve results/singular.json --method auto --device cpu
+./build/niryukti solve results/singular.json --method pdhg --device cuda --cuda-graphs --gpu-monitor
+```
+
+GPU barrier state continuation also reached OPTIMAL on the coupled-QP example with KKT 2.82e-8. Raw local validation files and checksums are in `results/local_completion_20260928/`; generated recording files are in `results/recording-ready-final-20260928/`.
 
 ## Still pending
 
