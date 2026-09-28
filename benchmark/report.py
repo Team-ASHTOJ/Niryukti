@@ -11,7 +11,7 @@ esc=lambda x:html.escape(str(x))
 body=''
 for r in rows:
     cls='ok' if r['status']=='OPTIMAL' else 'limit'
-    body+='<tr>'+''.join(f'<td class="{cls if k=="status" else ""}">{esc(r.get(k,""))}</td>' for k in ['instance','solver','run','status','verification_status','objective','primal_residual','kkt_error','end_to_end_seconds','process_wall_seconds'])+'</tr>'
+    body+='<tr>'+''.join(f'<td class="{cls if k=="status" else ""}">{esc(r.get(k,""))}</td>' for k in ['instance','solver','run','status','reported_status','verification_status','evidence_scope','objective','primal_residual','kkt_error','end_to_end_seconds','process_wall_seconds'])+'</tr>'
 finite=[r['median_end_to_end_seconds'] for r in summary if r['median_end_to_end_seconds'] is not None]
 maximum=max(finite,default=1) or 1
 bars=''
@@ -30,5 +30,5 @@ manifest_path=root/'manifest.json'
 manifest=json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
 page+=f'<p>Revision: {esc(manifest.get("git_commit","unknown"))}; working tree modified: {esc(manifest.get("git_dirty","unknown"))}. CPU: {esc(manifest.get("cpu_info","unknown"))}. Platform: {esc(manifest.get("platform","unknown"))}. Binary SHA-256: {esc(manifest.get("binary_sha256","unknown"))}.</p>'
 page+='<p>Standalone verification uses tolerance 1e-6. VERIFIED_FEASIBLE for MILP/MIQP certifies only the incumbent, not the search tree.</p>'
-page+=f'<h2>Median end-to-end time</h2><svg role="img" aria-label="Per-instance median solver times" viewBox="0 0 900 {60+30*len(summary)}">{bars}</svg><h2>Per-instance results</h2><div class="scroll"><table><thead><tr>'+''.join(f'<th>{h}</th>' for h in ['Instance','Solver','Run','Status','Verification','Objective','Primal residual','KKT','End-to-end s','Process s'])+'</tr></thead><tbody>'+body+'</tbody></table></div></html>'
+page+=f'<h2>Median end-to-end time</h2><svg role="img" aria-label="Per-instance median solver times" viewBox="0 0 900 {60+30*len(summary)}">{bars}</svg><h2>Per-instance results</h2><div class="scroll"><table><thead><tr>'+''.join(f'<th>{h}</th>' for h in ['Instance','Solver','Run','Evidence status','Solver status','Verification','Evidence scope','Objective','Primal residual','KKT','End-to-end s','Process s'])+'</tr></thead><tbody>'+body+'</tbody></table></div></html>'
 (root/'index.html').write_text(page);print(root/'index.html')

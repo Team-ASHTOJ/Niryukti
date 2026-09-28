@@ -24,6 +24,10 @@ class BenchmarkEvidence(unittest.TestCase):
             self.assertEqual(automatic['record']['method_selected'],'revised-primal-simplex')
             self.assertEqual(continuous['record']['verification_status'],'VERIFIED_OPTIMAL')
             self.assertEqual(integer['record']['verification_status'],'VERIFIED_FEASIBLE')
+            self.assertFalse(integer['record']['tree_proof_verified'])
+            self.assertIn(integer['record']['evidence_scope'], ('incumbent_only','relaxation_bound_gap'))
+            if integer['record']['evidence_scope']=='incumbent_only':
+                self.assertNotEqual(integer['record']['status'],'OPTIMAL')
             self.assertEqual(continuous['result']['verification_process']['exit_code'],0)
             self.assertTrue((out/'raw/000_toy.input.lp').is_file())
             self.assertTrue((out/'raw/000_toy_cpu_0.verify.stdout').is_file())

@@ -130,11 +130,19 @@ def main():
                 reported_status=data.get('status','UNKNOWN')
                 status=reported_status
                 verification_status=data.get('independent_verification',{}).get('status')
+                certificate=data.get('verification_certificate',{}).get('verification',{})
+                certificate_status=certificate.get('status')
+                is_mip=inspect.get('type') in ('MILP','MIQP')
+                evidence_scope='incumbent_only' if is_mip and verification_status=='VERIFIED_FEASIBLE' else 'continuous_kkt' if verification_status=='VERIFIED_OPTIMAL' else 'unverified'
+                if is_mip and verification_status=='VERIFIED_FEASIBLE' and certificate.get('valid') is True and certificate_status=='OPTIMAL_WITHIN_VERIFIED_GAP_TOLERANCE':
+                    evidence_scope='relaxation_bound_gap'
+                if is_mip and reported_status=='OPTIMAL' and evidence_scope=='incumbent_only':
+                    status='FEASIBLE_UNPROVEN'
                 accepted_verification=('VERIFIED_FEASIBLE',) if inspect.get('type') in ('MILP','MIQP') else ('VERIFIED_OPTIMAL',)
                 if reported_status=='OPTIMAL' and verification_status not in accepted_verification:
                     status='VERIFICATION_FAILED'
                 perf=data.get('performance',{})
-                record=dict(instance=path.name,solver=solver,run=run,warmup=run<0,status=status,reported_status=reported_status,verification_status=verification_status,problem_type=inspect.get('type'),objective=data.get('objective'),primal_residual=accuracy.get('primal_residual'),dual_residual=accuracy.get('dual_residual'),kkt_error=accuracy.get('kkt_error'),iterations=perf.get('iterations'),end_to_end_seconds=perf.get('end_to_end_seconds'),iteration_seconds=perf.get('iteration_seconds'),process_wall_seconds=wall,rows=inspect.get('rows'),columns=inspect.get('columns'),nonzeros=inspect.get('nonzeros'),dataset_sha256=checksum,method_selected=data.get('selection',{}).get('method'),relaxation_method_selected=data.get('selection',{}).get('relaxation_method'),device_reason=data.get('selection',{}).get('reason'),monitor_checks=perf.get('monitor_checks'),host_candidate_checks=perf.get('host_candidate_checks'),skipped_candidate_checks=perf.get('skipped_candidate_checks'),mip_gap=data.get('mip',{}).get('relative_gap',data.get('mip_gap')),best_bound=data.get('mip',{}).get('best_bound',data.get('best_bound')),nodes=data.get('mip',{}).get('nodes',data.get('nodes')))
+                record=dict(instance=path.name,solver=solver,run=run,warmup=run<0,status=status,reported_status=reported_status,verification_status=verification_status,certificate_status=certificate_status,evidence_scope=evidence_scope,tree_proof_verified=False,verified_mip_gap=certificate.get('metrics',{}).get('verified_relative_gap'),problem_type=inspect.get('type'),objective=data.get('objective'),primal_residual=accuracy.get('primal_residual'),dual_residual=accuracy.get('dual_residual'),kkt_error=accuracy.get('kkt_error'),iterations=perf.get('iterations'),end_to_end_seconds=perf.get('end_to_end_seconds'),iteration_seconds=perf.get('iteration_seconds'),process_wall_seconds=wall,rows=inspect.get('rows'),columns=inspect.get('columns'),nonzeros=inspect.get('nonzeros'),dataset_sha256=checksum,method_selected=data.get('selection',{}).get('method'),relaxation_method_selected=data.get('selection',{}).get('relaxation_method'),device_reason=data.get('selection',{}).get('reason'),monitor_checks=perf.get('monitor_checks'),host_candidate_checks=perf.get('host_candidate_checks'),skipped_candidate_checks=perf.get('skipped_candidate_checks'),mip_gap=data.get('mip',{}).get('relative_gap',data.get('mip_gap')),best_bound=data.get('mip',{}).get('best_bound',data.get('best_bound')),nodes=data.get('mip',{}).get('nodes',data.get('nodes')))
                 (raw/f'{name}.json').write_text(json.dumps(dict(record=record,command=command,exit_code=code,result=data),indent=2))
                 if run>=0:rows.append(record)
                 print(f"{path.name:24} {solver:6} run={run:2} {record['status']:18} objective={record['objective']} wall={wall:.4f}s",flush=True)
@@ -144,7 +152,7 @@ def main():
     for instance,solver in dict.fromkeys((r['instance'],r['solver']) for r in rows):
         group=[r for r in rows if (r['instance'],r['solver'])==(instance,solver)]
         vals=[r['end_to_end_seconds'] for r in group if r['end_to_end_seconds'] is not None]
-        summary.append(dict(instance=instance,solver=solver,optimal_runs=sum(r['status']=='OPTIMAL' for r in group),total_runs=len(group),statuses=[r['status'] for r in group],median_end_to_end_seconds=statistics.median(vals) if vals else None))
+        summary.append(dict(instance=instance,solver=solver,solver_reported_optimal_runs=sum(r['reported_status']=='OPTIMAL' for r in group),optimal_runs=sum(r['status']=='OPTIMAL' for r in group),total_runs=len(group),statuses=[r['status'] for r in group],median_end_to_end_seconds=statistics.median(vals) if vals else None))
     (out/'summary.json').write_text(json.dumps(summary,indent=2))
     subprocess.run([sys.executable,str(ROOT/'benchmark/report.py'),str(out)],check=True)
     subprocess.run([sys.executable,str(ROOT/'benchmark/profiles.py'),str(out/'runs.csv')],check=True)

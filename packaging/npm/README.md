@@ -49,8 +49,7 @@ npx niryukti report result.json --output report.html
 
 The authenticated HTTP service is provided by the Python package (`pip install
 niryukti`, then `niryukti serve`), not the Node CLI. See repository `docs/api.md`.
-The published 0.2.0 release predates `renderReport`; this documentation describes
-the next source release.
+Version 0.2.1 includes `renderReport` and the CLI report command.
 
 ## Supported scope and license
 

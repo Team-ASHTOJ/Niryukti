@@ -13,9 +13,7 @@ niryukti devices
 
 Python 3.10+ is required. Linux x86_64 wheels bundle the FP64 CPU executable and
 native library. Source installations require CMake 3.24+ and a C++20 compiler.
-CUDA is optional and is not bundled in CPU wheels. The currently published 0.2.0
-release predates the service/report additions described below; they are available
-in the next source release.
+CUDA is optional and is not bundled in CPU wheels. Version 0.2.1 includes the service and report additions described below.
 
 ## Build and solve a model
 

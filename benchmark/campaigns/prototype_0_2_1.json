@@ -1,0 +1,12 @@
+{
+  "name": "prototype-0.2.1",
+  "models": ["datasets/afiro.mps", "datasets/adlittle.mps", "datasets/israel.mps", "datasets/e226.mps", "examples/refinery.json", "examples/coupled_dispatch.json", "examples/integer_dispatch.json", "examples/supply_chain.json", "examples/scheduling.json"],
+  "solvers": "auto,cpu,cuda,highs",
+  "runs": 3,
+  "time_limit_seconds": 30,
+  "iteration_limit": 1000000,
+  "threads": 1,
+  "tolerance": 0.000001,
+  "method": "auto",
+  "precision": "fp64"
+}

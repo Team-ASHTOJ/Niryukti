@@ -7,6 +7,14 @@ def render_report(result, *, title="NIRYUKTI solve report"):
     if not isinstance(result, dict) or not isinstance(result.get("status"), str):
         raise ValueError("Report input must be a saved solve result with a status")
     rows = []
+    certificate = result.get("verification_certificate") or {}
+    verification = certificate.get("verification", {}) if isinstance(certificate, dict) else {}
+    is_mip = result.get("problem_type") in ("MILP", "MIQP") or bool(result.get("mip"))
+    if is_mip:
+        rows.append("<section><h2>Recorded integer-solution evidence</h2><p>Certificate status: " +
+                    html.escape(str(verification.get("status", "not supplied"))) +
+                    ". Incumbent feasibility and relaxation-bound gap evidence are distinct from a full tree proof. "
+                    "The complete search tree has not been independently replayed.</p></section>")
     for section in ("accuracy", "performance", "selection", "hardware", "mip", "model"):
         fields = result.get(section, {})
         if not isinstance(fields, dict):
