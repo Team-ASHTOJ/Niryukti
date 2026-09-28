@@ -2,10 +2,11 @@ name: Build and publish VANTAGE packages
 on:
   workflow_dispatch:
     inputs:
-      publish:
-        description: 'Publish tested artifacts (requires configured registry environments)'
-        type: boolean
-        default: false
+      target:
+        description: 'Registry to publish after tests (build only uploads artifacts)'
+        type: choice
+        options: [build, pypi, npm, both]
+        default: build
 permissions:
   contents: read
 jobs:
@@ -37,7 +38,7 @@ jobs:
           name: npm-release
           path: /tmp/npm-dist/*.tgz
   publish-python:
-    if: inputs.publish
+    if: inputs.target == 'pypi' || inputs.target == 'both'
     needs: [python, node]
     runs-on: ubuntu-latest
     environment: pypi
@@ -50,7 +51,7 @@ jobs:
           path: dist
       - uses: pypa/gh-action-pypi-publish@release/v1
   publish-node:
-    if: inputs.publish
+    if: inputs.target == 'npm' || inputs.target == 'both'
     needs: [python, node]
     runs-on: ubuntu-latest
     environment: npm

@@ -26,8 +26,8 @@ These are distinct from the GitHub repository owner **shoaib2000857**.
 3. In GitHub repository settings, create environment `pypi`; configure a required
    reviewer if your GitHub plan supports it.
 4. Push the release code, run **Build and publish VANTAGE packages** with
-   publishing disabled, inspect the artifacts/tests, then run with publishing
-   enabled. Only successful Python and Node build/test jobs allow publication.
+   target `build`, inspect the artifacts/tests, then run with target `pypi`
+   for the first Python upload (`both` after npm OIDC setup). Only successful Python and Node build/test jobs allow publication.
 
 No PyPI API token is needed with this OIDC setup. The pending publisher creates
 an unclaimed project on the first successful upload; name availability is not
