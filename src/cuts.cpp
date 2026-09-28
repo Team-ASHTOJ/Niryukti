@@ -2,6 +2,44 @@
 #include <set>
 #include <stdexcept>
 namespace vantage {
+bool propagate_binary_conflicts(const std::vector<std::vector<std::pair<int64_t, int>>> &clauses,
+                                std::vector<double> &lb, std::vector<double> &ub,
+                                int64_t &tightened) {
+    for (size_t pass = 0; pass <= clauses.size(); ++pass) {
+        bool changed = false;
+        for (const auto &clause : clauses) {
+            int64_t undecided = -1;
+            int forbidden = 0, count = 0;
+            bool satisfied = false;
+            for (auto [j, v] : clause) {
+                if (v < lb[j] || v > ub[j]) {
+                    satisfied = true;
+                    break;
+                }
+                if (lb[j] != v || ub[j] != v) {
+                    undecided = j;
+                    forbidden = v;
+                    ++count;
+                }
+            }
+            if (satisfied)
+                continue;
+            if (!count)
+                return false;
+            if (count == 1) {
+                if (forbidden == 0)
+                    lb[undecided] = 1;
+                else
+                    ub[undecided] = 0;
+                ++tightened;
+                changed = true;
+            }
+        }
+        if (!changed)
+            break;
+    }
+    return true;
+}
 int add_mir_cuts(Model &m, int limit, const std::vector<double> *point) {
     if (point && point->size() != m.c.size())
         throw std::runtime_error("MIR separation point dimension mismatch");

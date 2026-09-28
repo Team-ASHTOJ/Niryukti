@@ -304,18 +304,25 @@ Result solve_mip(const Model &original, const Options &options) {
         int age = 0, uses = 0;
     };
     std::vector<PooledCut> cut_pool;
-    auto append_cut = [](Model &model, const PooledCut &cut) {
+    auto append_cuts = [](Model &model, const std::vector<PooledCut> &cuts) {
+        if (cuts.empty())
+            return;
+        size_t extra = 0;
+        for (const auto &cut : cuts)
+            extra += cut.terms.size();
         std::vector<Entry> entries;
-        entries.reserve(model.A.value.size() + cut.terms.size());
+        entries.reserve(model.A.value.size() + extra);
         for (int64_t i = 0; i < model.A.rows; ++i)
             for (auto k = model.A.ptr[i]; k < model.A.ptr[i + 1]; ++k)
                 entries.push_back({i, model.A.index[k], model.A.value[k]});
-        auto row = model.rl.size();
-        for (auto [j, a] : cut.terms)
-            entries.push_back({int64_t(row), j, a});
-        model.rl.push_back(cut.lower);
-        model.ru.push_back(cut.upper);
-        model.row_names.push_back("vantage_pool_" + std::to_string(row));
+        for (const auto &cut : cuts) {
+            auto row = model.rl.size();
+            for (auto [j, a] : cut.terms)
+                entries.push_back({int64_t(row), j, a});
+            model.rl.push_back(cut.lower);
+            model.ru.push_back(cut.upper);
+            model.row_names.push_back("niryukti_pool_" + std::to_string(row));
+        }
         model.A = Sparse::build(model.rl.size(), model.c.size(), std::move(entries));
     };
     auto learn_conflict = [&](const Node &node) {
@@ -444,11 +451,16 @@ Result solve_mip(const Model &original, const Options &options) {
         conflicts = saved.at("conflicts").get<std::vector<Conflict>>();
         if (conflicts.size() > 128)
             throw std::runtime_error("Checkpoint conflict pool too large");
-        for (const auto &conflict : conflicts)
+        for (const auto &conflict : conflicts) {
+            if (conflict.empty())
+                throw std::runtime_error("Empty checkpoint conflict");
+            std::set<int64_t> variables;
             for (auto [j, v] : conflict)
                 if (j < 0 || j >= int64_t(original.c.size()) ||
-                    original.types[j] != VarType::Binary || (v != 0 && v != 1))
+                    original.types[j] != VarType::Binary || (v != 0 && v != 1) ||
+                    !variables.insert(j).second)
                     throw std::runtime_error("Malformed checkpoint binary conflict");
+        }
         incumbent = decode(saved.at("incumbent"));
         closed = decode(saved.at("closed"));
         unresolved = decode(saved.at("unresolved"));
@@ -559,16 +571,8 @@ Result solve_mip(const Model &original, const Options &options) {
             closed = std::min(closed, node.bound);
             continue;
         }
-        bool conflict_pruned = false;
-        for (const auto &conflict : conflicts) {
-            bool matches = true;
-            for (auto [j, v] : conflict)
-                matches &= node.lb[j] == v && node.ub[j] == v;
-            if (matches) {
-                conflict_pruned = true;
-                break;
-            }
-        }
+        bool conflict_pruned =
+            !propagate_binary_conflicts(conflicts, node.lb, node.ub, out.bounds_tightened);
         if (conflict_pruned) {
             out.conflicts_pruned++;
             out.nodes++;
@@ -590,17 +594,36 @@ Result solve_mip(const Model &original, const Options &options) {
             continue;
         }
         relaxation = root_relaxation;
+        std::vector<PooledCut> active_cuts;
         if (options.cuts) {
             std::stable_sort(cut_pool.begin(), cut_pool.end(),
                              [](const auto &a, const auto &b) { return a.efficacy > b.efficacy; });
             for (size_t i = 0; i < std::min<size_t>(16, cut_pool.size()); ++i) {
-                append_cut(relaxation, cut_pool[i]);
+                active_cuts.push_back(cut_pool[i]);
                 cut_pool[i].uses++;
             }
         }
+        if (options.cuts) {
+            // sum_{v=0} x_j + sum_{v=1}(1-x_j) >= 1.
+            // These rows are globally valid because learned conjunctions are
+            // checked only after certified infeasibility, never a limit status.
+            for (const auto &conflict : conflicts) {
+                PooledCut cut;
+                cut.lower = 1;
+                cut.upper = inf;
+                for (auto [j, v] : conflict) {
+                    cut.terms.push_back({j, v ? -1. : 1.});
+                    cut.lower -= v;
+                }
+                active_cuts.push_back(std::move(cut));
+            }
+        }
+        append_cuts(relaxation, active_cuts);
         relaxation.lb = node.lb;
         relaxation.ub = node.ub;
         Options o = options;
+        // Node bounds already passed GPU propagation; do not repeat it in its LP.
+        o.gpu_presolve = false;
         o.checkpoint_path.clear();
         o.resume_path.clear();
         o.initial_x = node.x;

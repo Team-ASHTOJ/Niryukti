@@ -232,3 +232,5 @@ See [certificate lifecycle, CLI/API, replay checks and limitations](docs/certifi
 Run `scripts/run_certificate_demo.sh` for an offline valid → invalid → valid demonstration.
 
 Current implementation and remaining work: [2026-09-28 record](docs/improvements_20260928.md).
+
+GPU restart, propagation and conflict updates: [implementation and limits](docs/gpu_conflicts_20260928.md).

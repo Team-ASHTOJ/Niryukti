@@ -247,6 +247,31 @@ void sparse_qp_recession_guard() {
     near(r.x[0], 1, 1e-6);
     near(r.accuracy.objective, -1, 1e-6);
 }
+void binary_conflict_propagation() {
+    std::vector<std::vector<std::pair<int64_t, int>>> clauses = {{{0, 1}, {1, 1}},
+                                                                 {{1, 0}, {2, 1}}};
+    std::vector<double> lb = {1, 0, 0}, ub = {1, 1, 1};
+    int64_t changes = 0;
+    require(propagate_binary_conflicts(clauses, lb, ub, changes),
+            "conflict unit propagation feasible");
+    require(ub[1] == 0 && ub[2] == 0 && changes == 2, "conflict implications cascade");
+    for (int mask = 0; mask < 8; ++mask) {
+        bool satisfies = true;
+        for (const auto &clause : clauses) {
+            bool matches = true;
+            for (auto [j, v] : clause)
+                matches &= ((mask >> j) & 1) == v;
+            satisfies &= !matches;
+        }
+        if (satisfies && (mask & 1))
+            for (int j = 0; j < 3; ++j)
+                require(((mask >> j) & 1) >= lb[j] && ((mask >> j) & 1) <= ub[j],
+                        "conflicts preserve every feasible binary assignment");
+    }
+    lb = {1, 1, 0};
+    ub = {1, 1, 1};
+    require(!propagate_binary_conflicts(clauses, lb, ub, changes), "conflict contradiction");
+}
 void simplex_and_cuts() {
     std::mt19937 generator(26119);
     for (int trial = 0; trial < 40; ++trial) {
@@ -646,6 +671,27 @@ void completion_regressions() {
                     }
                 }
         require(count > 0, "GPU propagation oracle has feasible points");
+        auto continuous = model(2, 1, {{0, 0, 2}, {0, 1, 1}});
+        continuous.lb = {0, 0};
+        continuous.ub = {10, 1};
+        continuous.rl = {3.5};
+        continuous.ru = {4.5};
+        auto cl = continuous.lb, cu = continuous.ub;
+        require(cuda_propagate_integer_bounds(continuous, cl, cu), "GPU continuous propagation");
+        require(cl[0] > 1.2 && cu[0] < 2.3,
+                "GPU continuous endpoints tightened without integer rounding");
+        for (double x : {1.25, 1.75, 2.25})
+            for (double y : {0., .5, 1.})
+                if (verify(continuous, {x, y}, {0}).primal == 0)
+                    require(x >= cl[0] && x <= cu[0] && y >= cl[1] && y <= cu[1],
+                            "GPU continuous propagation preserves boundary feasible points");
+        Options presolve_gpu;
+        presolve_gpu.device = "cuda";
+        presolve_gpu.gpu_presolve = true;
+        continuous.c = {1, 0};
+        auto continuous_result = solve(continuous, presolve_gpu);
+        require(continuous_result.status == "OPTIMAL", "continuous GPU presolve end-to-end");
+        near(continuous_result.accuracy.objective, 1.25, 1e-5);
         auto impossible = integer;
         impossible.rl[1] = 10;
         impossible.ru[1] = 11;
@@ -658,6 +704,23 @@ void completion_regressions() {
         lp.ub = {5, 5};
         lp.rl = {3};
         lp.c = {1, 2};
+        auto resident = cuda_backend(lp, {0, 0}, {0});
+        resident->advance(20, .1, .1);
+        std::vector<double> rx, ry, ra, rb;
+        resident->candidates(rx, ry, ra, rb);
+        auto state = resident->snapshot();
+        require(resident->reset_candidate(true), "CUDA resident averaged restart supported");
+        resident->advance(20, .1, .1);
+        std::vector<double> sx, sy, sa, sb;
+        resident->candidates(sx, sy, sa, sb);
+        resident->restore(state);
+        resident->reset(ra, rb);
+        resident->advance(20, .1, .1);
+        resident->candidates(rx, ry, ra, rb);
+        for (size_t j = 0; j < rx.size(); ++j)
+            near(rx[j], sx[j], 1e-12);
+        for (size_t j = 0; j < ry.size(); ++j)
+            near(ry[j], sy[j], 1e-12);
         Options bo;
         bo.device = "cuda";
         bo.iteration_limit = 5000;
@@ -1081,6 +1144,7 @@ int main() {
         sparse_quadratic();
         quadratic_extensions();
         sparse_qp_recession_guard();
+        binary_conflict_propagation();
         simplex_and_cuts();
         completion_regressions();
         scaling();

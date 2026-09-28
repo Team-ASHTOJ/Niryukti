@@ -474,6 +474,8 @@ __global__ void propagate_rows(int64_t rows, const int64_t *ptr, const int64_t *
     for (auto k = ptr[row]; k < ptr[row + 1]; ++k) {
         auto j = index[k];
         double v = a[k];
+        if (v == 0)
+            continue;
         double lo = __dmul_rd(v, v > 0 ? lb[j] : ub[j]);
         double hi = __dmul_ru(v, v > 0 ? ub[j] : lb[j]);
         if (isinf(lo))
@@ -489,7 +491,7 @@ __global__ void propagate_rows(int64_t rows, const int64_t *ptr, const int64_t *
         atomicExch(failed, 1);
     for (auto k = ptr[row]; k < ptr[row + 1]; ++k) {
         auto j = index[k];
-        if (!integer[j])
+        if (a[k] == 0)
             continue;
         double v = a[k], endpoint_low = v > 0 ? lb[j] : ub[j],
                endpoint_high = v > 0 ? ub[j] : lb[j];
@@ -516,10 +518,10 @@ __global__ void propagate_rows(int64_t rows, const int64_t *ptr, const int64_t *
             else
                 l = __ddiv_rd(numerator, v);
         }
-        if (fabs(l) < 0x1p52)
-            bound_max(new_lb + j, ceil(l));
-        if (fabs(u) < 0x1p52)
-            bound_min(new_ub + j, floor(u));
+        if (isfinite(l) && (!integer[j] || fabs(l) < 0x1p52))
+            bound_max(new_lb + j, integer[j] ? ceil(l) : l);
+        if (isfinite(u) && (!integer[j] || fabs(u) < 0x1p52))
+            bound_min(new_ub + j, integer[j] ? floor(u) : u);
     }
 }
 #endif
@@ -867,10 +869,12 @@ class CudaBackend final : public IterationBackend {
         xa.download(pax);
         ya.download(pay);
         // Match the CPU activity rebasing at candidate checkpoints.
-        refresh_activity(px);
+        refresh_activity();
     }
-    void refresh_activity(const std::vector<double> &px) {
-        xb.upload(px);
+    void refresh_activity() {
+        if (x.n)
+            check(cudaMemcpy(xb.p, x.p, x.n * sizeof(double), cudaMemcpyDeviceToDevice),
+                  "resident candidate rebasing");
         double one = 1, zero = 0;
         if (a.nnz) {
             sparse_check(cusparseSpMV(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE, &one, a.d, vx.d,
@@ -882,13 +886,52 @@ class CudaBackend final : public IterationBackend {
                   "refresh activity copy");
         }
     }
+    bool reset_candidate(bool average) override {
+        auto copy = [&](Buffer<double> &dst, Buffer<double> &src) {
+            if (dst.n)
+                check(cudaMemcpyAsync(dst.p, src.p, dst.n * sizeof(double),
+                                      cudaMemcpyDeviceToDevice, stream.value),
+                      "resident restart copy");
+        };
+        if (average) {
+            copy(x, xa);
+            copy(y, ya);
+        }
+        copy(xb, x);
+        double one = 1, zero = 0;
+        if (a.nnz) {
+            sparse_check(cusparseSpMV(handle.h, CUSPARSE_OPERATION_NON_TRANSPOSE, &one, a.d, vx.d,
+                                      &zero, vax.d, CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG2,
+                                      workspace->p),
+                         "resident restart activity");
+            copy(previous_ax, ax);
+        }
+        if (halpern) {
+            copy(anchor_x, x);
+            copy(anchor_y, y);
+            copy(anchor_ax, previous_ax);
+            check(cudaMemsetAsync(state.p + 6, 0, 5 * sizeof(double), stream.value),
+                  "resident restart epoch");
+            request_restart = false;
+        }
+        if (xa.n)
+            check(cudaMemsetAsync(xa.p, 0, xa.n * sizeof(double), stream.value),
+                  "restart average x");
+        if (ya.n)
+            check(cudaMemsetAsync(ya.p, 0, ya.n * sizeof(double), stream.value),
+                  "restart average y");
+        check(cudaMemsetAsync(state.p + 1, 0, sizeof(double), stream.value),
+              "restart averaging mass");
+        check(cudaStreamSynchronize(stream.value), "resident restart completion");
+        return true;
+    }
     void reset(const std::vector<double> &px, const std::vector<double> &py) override {
         x.upload(px);
         xb.upload(px);
         y.upload(py);
         xa.zero();
         ya.zero();
-        refresh_activity(px);
+        refresh_activity();
         if (halpern) {
             anchor_x.upload(px);
             anchor_y.upload(py);

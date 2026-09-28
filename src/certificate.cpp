@@ -268,7 +268,7 @@ std::string verify_certificate_json(const Model &m, const std::string &text) {
                 if (replayed.at("checks").contains(key) &&
                     !replayed.at("checks").at(key).at("pass").get<bool>()) {
                     std::string reason =
-                        key == "objective_consistency" ? "objective mismatch" : key;
+                        std::string(key) == "objective_consistency" ? "objective mismatch" : key;
                     if (reason != "objective mismatch")
                         std::replace(reason.begin(), reason.end(), '_', ' ');
                     return J({{"valid", false}, {"status", "INVALID"}, {"reason", reason}}).dump(2);

@@ -17,8 +17,8 @@ volatile std::sig_atomic_t interrupted = 0;
 Result solve(const Model &m, const Options &o) {
     auto overall_start = Clock::now();
     m.validate();
-    if (o.gpu_presolve && (!m.is_mip() || o.device == "cpu" || !cuda_available()))
-        throw std::runtime_error("GPU integer propagation requires CUDA MILP/MIQP");
+    if (o.gpu_presolve && (o.device == "cpu" || !cuda_available()))
+        throw std::runtime_error("GPU bound propagation requires an available CUDA backend");
     if (o.batch_strong_branching && (o.device == "cpu" || !cuda_available() || m.is_qp() ||
                                      o.branching != "reliability" || !m.is_mip()))
         throw std::runtime_error(
@@ -105,11 +105,18 @@ Result solve_continuous(const Model &original, const Options &o) {
         throw std::runtime_error("Experimental Halpern supports continuous LP with --no-adaptive");
     if (o.method == "auto") {
         auto start = Clock::now();
-        auto advice = advise_model(original, o, (original.A.value.size() + original.Q.value.size() >= 100000 || gpu_request(o) || o.cuda_graphs || o.matrix_precision == "mixed" || o.gpu_presolve || o.batch_strong_branching) ? hardware_info() : Hardware{});
+        auto advice =
+            advise_model(original, o,
+                         (original.A.value.size() + original.Q.value.size() >= 100000 ||
+                          gpu_request(o) || o.cuda_graphs || o.matrix_precision == "mixed" ||
+                          o.gpu_presolve || o.batch_strong_branching)
+                             ? hardware_info()
+                             : Hardware{});
         Options selected = o;
         selected.method = advice.method;
         // First-order backend selection is repeated after presolve against current free memory.
-        if (advice.method != "pdhg") selected.device = advice.device;
+        if (advice.method != "pdhg")
+            selected.device = advice.device;
         bool reserve = advice.method == "simplex" || advice.method == "dual-simplex" ||
                        advice.method == "barrier";
         if (reserve && std::isfinite(o.time_limit))
@@ -135,8 +142,8 @@ Result solve_continuous(const Model &original, const Options &o) {
         auto iteration_time = first.iteration_seconds + second.iteration_seconds;
         auto verification = first.verification_seconds + second.verification_seconds;
         if (second.status != "OPTIMAL" && first.accuracy.finite &&
-            first.accuracy.kkt < second.accuracy.kkt &&
-            second.status != "INFEASIBLE" && second.status != "UNBOUNDED") {
+            first.accuracy.kkt < second.accuracy.kkt && second.status != "INFEASIBLE" &&
+            second.status != "UNBOUNDED") {
             first.status = second.status;
             second = std::move(first);
         }
@@ -145,8 +152,8 @@ Result solve_continuous(const Model &original, const Options &o) {
         second.iteration_seconds = iteration_time;
         second.verification_seconds = verification;
         second.seconds = elapsed(start);
-        second.device_reason = "Advisor: " + advice.reason + "; recovery to PDHG; " +
-                               second.device_reason;
+        second.device_reason =
+            "Advisor: " + advice.reason + "; recovery to PDHG; " + second.device_reason;
         return second;
     }
     if (o.method == "concurrent")
@@ -195,6 +202,17 @@ Result solve_continuous(const Model &original, const Options &o) {
                             240. * (original.A.rows + original.A.cols + 2);
     Verifier verifier(original);
     r.status = "ITERATION_LIMIT";
+    std::vector<double> propagated_lower, propagated_upper;
+    if (o.gpu_presolve) {
+        propagated_lower = original.lb;
+        propagated_upper = original.ub;
+        if (!cuda_propagate_integer_bounds(original, propagated_lower, propagated_upper)) {
+            propagated_lower.clear();
+            propagated_upper.clear();
+        }
+        // Continuous bound changes require dual postsolve provenance. Until that
+        // exists, use them only to initialize x, preserving the original dual box.
+    }
     auto prep = prepare(original, o);
     r.preprocess_seconds = elapsed(start);
     if (!prep.failure.empty()) {
@@ -210,10 +228,13 @@ Result solve_continuous(const Model &original, const Options &o) {
     r.removed_columns = original.c.size() - m.c.size();
     r.removed_rows = original.rl.size() - m.rl.size();
     std::vector<double> x(m.c.size()), y(m.rl.size());
-    for (size_t j = 0; j < x.size(); j++)
-        x[j] =
-            std::clamp(o.initial_x.empty() ? 0 : o.initial_x[prep.cols[j]] / prep.column_scale[j],
-                       m.lb[j], m.ub[j]);
+    for (size_t j = 0; j < x.size(); j++) {
+        auto col = prep.cols[j];
+        double initial = o.initial_x.empty() ? 0 : o.initial_x[col];
+        if (!propagated_lower.empty())
+            initial = std::clamp(initial, propagated_lower[col], propagated_upper[col]);
+        x[j] = std::clamp(initial / prep.column_scale[j], m.lb[j], m.ub[j]);
+    }
     for (size_t i = 0; i < y.size(); i++)
         if (!o.initial_y.empty())
             y[i] = o.initial_y[prep.rows[i]] / (prep.row_scale[i] * prep.objective_scale);
@@ -285,7 +306,12 @@ Result solve_continuous(const Model &original, const Options &o) {
         if (c2 > 1e-24 && b2 > 1e-24)
             weight = std::clamp(std::sqrt(double(c2 / b2)), 1e-4, 1e4);
     }
-    auto backend_advice = advise_model(m, o, (m.A.value.size() + m.Q.value.size() >= 100000 || gpu_request(o) || o.cuda_graphs || o.matrix_precision == "mixed" || o.gpu_presolve || o.batch_strong_branching) ? hardware_info() : Hardware{});
+    auto backend_advice = advise_model(
+        m, o,
+        (m.A.value.size() + m.Q.value.size() >= 100000 || gpu_request(o) || o.cuda_graphs ||
+         o.matrix_precision == "mixed" || o.gpu_presolve || o.batch_strong_branching)
+            ? hardware_info()
+            : Hardware{});
     bool usecuda = gpu_request(o) || backend_advice.device == gpu_backend_name();
     r.backend = usecuda ? gpu_backend_name() : "cpu";
     r.device_name = usecuda ? cuda_description() : "CPU";
@@ -661,7 +687,8 @@ Result solve_continuous(const Model &original, const Options &o) {
                     r.weight_updates++;
                 }
             }
-            backend->reset(cx, cy);
+            if (!backend->reset_candidate(residual_restarts || avg))
+                backend->reset(cx, cy);
             epochx = cx;
             epochy = cy;
             restart_kkt = ca.kkt;

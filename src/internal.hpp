@@ -56,6 +56,9 @@ class PrimalWeightController {
         initialized = v[2] != 0;
     }
 };
+// Clauses forbid a conjunction of binary assignments. False means contradiction.
+bool propagate_binary_conflicts(const std::vector<std::vector<std::pair<int64_t, int>>> &,
+                                std::vector<double> &, std::vector<double> &, int64_t &);
 class IterationBackend {
   public:
     virtual ~IterationBackend() = default;
@@ -73,6 +76,10 @@ class IterationBackend {
     }
     virtual void candidates(std::vector<double> &x, std::vector<double> &y, std::vector<double> &ax,
                             std::vector<double> &ay) = 0;
+    // Restart from a resident current/averaged candidate without host uploads.
+    virtual bool reset_candidate(bool) {
+        return false;
+    }
     virtual void reset(const std::vector<double> &x, const std::vector<double> &y) = 0;
 };
 std::unique_ptr<IterationBackend> cpu_backend(const Model &, const std::vector<double> &,
