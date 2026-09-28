@@ -684,3 +684,7 @@ or use it as a 45-second research-context insert.
 - Use current NIRYUKTI naming, readable zoom and accurate package versions.
 - Keep synthetic labels, historical benchmark versions and unsupported limits visible.
 - No secrets, fabricated utilization, hidden failed runs or unsupported performance promises.
+
+## Ready-made cinematic opening and closing
+
+The [cinematic asset guide](../media/cinematic/README.md) includes a 12-second opening, an 8-second closing, exact voiceover timing, editing instructions and editable rendering source. Use these around the dashboard demonstration; both are silent so narration and music can remain under your control.
