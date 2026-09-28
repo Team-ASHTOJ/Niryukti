@@ -10,7 +10,8 @@ from pathlib import Path
 
 
 def _binary(binary=None):
-    return str(binary or os.environ.get('VANTAGE_BINARY') or Path(__file__).resolve().parents[2] / 'build/vantage')
+    from ._runtime import executable
+    return executable(binary)
 
 
 def solve(path, *, device='auto', tol=1e-6, time_limit=60, threads=1, warm_start=None,

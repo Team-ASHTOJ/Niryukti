@@ -15,7 +15,8 @@ class NativeSession(SolverSession):
     def __init__(self, model, *, library=None):
         suffix='dylib' if sys.platform=='darwin' else 'so'
         default=Path(__file__).resolve().parents[2]/'build'/f'libvantage_c.{suffix}'
-        self._lib=ctypes.CDLL(str(library or os.environ.get('VANTAGE_LIBRARY') or default))
+        from ._runtime import shared_library
+        self._lib=ctypes.CDLL(shared_library(library))
         self._lib.vantage_abi_version.restype=ctypes.c_uint
         if self._lib.vantage_abi_version()!=1: raise RuntimeError('Unsupported native ABI')
         self._lib.vantage_open.argtypes=[ctypes.c_char_p];self._lib.vantage_open.restype=ctypes.c_void_p

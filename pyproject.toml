@@ -1,10 +1,39 @@
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = ["scikit-build-core>=0.10,<1"]
+build-backend = "scikit_build_core.build"
+
 [project]
 name = "vantage-opt"
 version = "0.2.0"
-description = "Python access to the independent NIRYUKTI sparse optimization engine"
+description = "Independent sparse LP, convex QP and mixed-integer optimization engine"
+readme = "packaging/README.md"
 requires-python = ">=3.10"
-[tool.setuptools.packages.find]
-where = ["python"]
+license = "AGPL-3.0-only"
+license-files = ["LICENSE", "NOTICE", "third_party/JSON-LICENSE.MIT", "third_party/eigen/COPYING.*"]
+
+[project.scripts]
+vantage = "vantage.cli:main"
+
+[project.urls]
+Repository = "https://github.com/shoaib2000857/Vantage"
+
+[tool.scikit-build]
+wheel.packages = ["python/vantage"]
+wheel.py-api = "py3"
+build.tool-args = ["-j2"]
+sdist.include = ["/CMakeLists.txt", "/include/**", "/src/**", "/app/**", "/third_party/**", "/python/vantage/**", "/packaging/README.md", "/pyproject.toml", "/LICENSE", "/NOTICE"]
+sdist.exclude = [".git/**", "datasets/**", "results/**", "dashboard/**", "build*/**", "examples/**", "tests/**", "node_modules/**"]
+
+[tool.scikit-build.cmake.define]
+BUILD_TESTING = "OFF"
+VANTAGE_CUDA = "OFF"
+VANTAGE_HIP = "OFF"
+VANTAGE_OPENMP = "OFF"
+
+[tool.cibuildwheel]
+build = "cp310-manylinux_x86_64"
+archs = ["x86_64"]
+test-command = "python {project}/tests/packaging/python_smoke.py"
+
+[tool.cibuildwheel.linux]
+manylinux-x86_64-image = "manylinux_2_28"

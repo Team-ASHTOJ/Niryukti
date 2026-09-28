@@ -1,0 +1,11 @@
+VANTAGE / NIRYUKTI
+Copyright (c) 2026 VANTAGE contributors
+
+Original project code: GNU AGPL version 3 only (AGPL-3.0-only).
+Third-party code retains its original copyright notices and license terms:
+- nlohmann/json: MIT, third_party/JSON-LICENSE.MIT
+- Eigen: primarily MPL-2.0, with additional notices in third_party/eigen/COPYING.*
+The AGPL does not grant rights to project names, logos or other trademarks.
+Corresponding source is included in Python source distributions and npm tarballs.
+Development repository: https://github.com/shoaib2000857/Vantage
+Repository access depends on its visibility; release source archives are public.

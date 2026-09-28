@@ -1,0 +1,34 @@
+{
+  "name": "vantage-opt",
+  "version": "0.2.0",
+  "description": "Independent native sparse optimization engine for Node.js",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "license": "AGPL-3.0-only",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "install": "node install.js",
+    "test": "node smoke.cjs"
+  },
+  "bin": {
+    "vantage": "cli.js"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "cli.js",
+    "install.js",
+    "README.md",
+    "engine",
+    "native",
+    "smoke.cjs",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shoaib2000857/Vantage.git"
+  }
+}

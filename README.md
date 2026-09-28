@@ -14,6 +14,14 @@ An independent sparse optimization engine for SIH26119, built in C++20 with an o
 
 Open **http://127.0.0.1:8080** for the local dashboard: solver overview, capability/pending-work cards, large-model and public-baseline comparisons, accuracy details, model library, live CPU/GPU solves, model import and downloadable results. The interface uses real saved measurements and the actual solver executable. See [dashboard documentation](dashboard/README.md).
 
+## License
+
+Original project code is licensed **AGPL-3.0-only**. Covered modified redistributions must remain under AGPL; modified network deployments must offer corresponding source to users. Commercial use and copying are permitted. See [LICENSE](LICENSE), [third-party notices](NOTICE), and [publishing setup](docs/publishing.md).
+
+## Packages
+
+Python wheels now bundle the CPU engine and native C library; the npm source package builds the engine locally. These are tested local distributions, not published registry packages yet. See [build/install instructions](packaging/README.md) and [release gates and validation](docs/distribution_20260928.md). Docker recipes include both CLI and Python/native APIs.
+
 ## Run it
 
 ```bash

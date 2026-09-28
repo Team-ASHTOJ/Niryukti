@@ -1,7 +1,7 @@
 FROM ubuntu:24.04 AS build
 RUN apt-get update && apt-get install -y --no-install-recommends cmake g++ make && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
-COPY CMakeLists.txt ./
+COPY CMakeLists.txt LICENSE NOTICE ./
 COPY include include
 COPY src src
 COPY app app
@@ -14,10 +14,16 @@ FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends python3 libgomp1 && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/vantage
 COPY --from=build /src/build/vantage build/vantage
+COPY --from=build /src/build/libvantage_c.so build/libvantage_c.so
+COPY python python
+ENV PYTHONPATH=/opt/vantage/python
+ENV VANTAGE_BINARY=/opt/vantage/build/vantage
+ENV VANTAGE_LIBRARY=/opt/vantage/build/libvantage_c.so
 COPY dashboard dashboard
 COPY examples examples
 COPY datasets datasets
 COPY docs docs
+COPY LICENSE NOTICE ./
 RUN useradd --create-home solver && mkdir -p results && chown solver:solver results
 USER solver
 ENTRYPOINT ["/opt/vantage/build/vantage"]

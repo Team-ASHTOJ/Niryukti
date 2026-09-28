@@ -254,7 +254,7 @@ def run_job(job, options):
     finally:
         job.pop('process',None)
         job['finished_at'] = time.time()
-        (STORE/f"{job['id']}.json").write_text(json.dumps(clean(public_job(job)), indent=2))
+        (STORE/f"{job['id']}.json").write_text(json.dumps(clean(public_job(job,full=True)), indent=2))
 
 
 class Handler(BaseHTTPRequestHandler):
