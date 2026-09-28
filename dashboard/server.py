@@ -363,7 +363,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(400,dict(error='Invalid solver settings.'))
                 kind=body.get('kind','solve')
                 if kind not in ('solve','arena') or (kind=='arena' and limit>15):return self.send(400,dict(error='Arena supports at most 15 seconds per measured run.'))
-                method=body.get('method','pdhg');branching=body.get('branching','fractional');node_selection=body.get('node_selection','best-bound');primal_heuristic=body.get('primal_heuristic','repair')
+                method=body.get('method','auto');branching=body.get('branching','fractional');node_selection=body.get('node_selection','best-bound');primal_heuristic=body.get('primal_heuristic','repair')
                 if method not in ('auto','simplex','dual-simplex','barrier','concurrent','pdhg','rhpdhg','r2hpdhg') or branching not in ('fractional','reliability') or node_selection not in ('best-bound','depth-first','best-estimate') or primal_heuristic not in ('repair','pump','rins','local','all'):
                     return self.send(400,dict(error='Invalid algorithm settings.'))
                 if method in ('simplex','dual-simplex') and device=='cuda':

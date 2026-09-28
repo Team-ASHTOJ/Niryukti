@@ -79,9 +79,11 @@ def main():
         for solver in a.solvers.split(','):
             for run in range(-1 if solver=='cuda' else 0,a.runs):
                 name=f'{tag}_{solver}_{"warmup" if run<0 else run}'
-                if solver in ('cpu','cuda'):
-                    command=[a.binary,'solve',str(path),'--device',solver,'--time-limit',str(a.time_limit),'--threads',str(a.threads),'--tol',str(a.tol),'--iterations',str(a.iterations)]
-                    command+=['--method',a.method]
+                if solver in ('auto','cpu','cuda'):
+                    selected_device='auto' if solver=='auto' else solver
+                    selected_method='auto' if solver=='auto' else a.method
+                    command=[a.binary,'solve',str(path),'--device',selected_device,'--time-limit',str(a.time_limit),'--threads',str(a.threads),'--tol',str(a.tol),'--iterations',str(a.iterations)]
+                    command+=['--method',selected_method]
                     if a.scaling!='ruiz':command+=['--scaling',a.scaling]
                     if a.branching!='fractional':command+=['--branching',a.branching]
                     if a.node_selection!='best-bound':command+=['--node-selection',a.node_selection]
@@ -105,7 +107,7 @@ def main():
                 data,stdout,stderr,code,wall=execute(command,a.time_limit+30)
                 (raw/f'{name}.stdout').write_text(stdout);(raw/f'{name}.stderr').write_text(stderr)
                 accuracy=data.get('accuracy',{})
-                if solver in ('cpu','cuda') and data.get('model',{}).get('fingerprint'):
+                if solver in ('auto','cpu','cuda') and data.get('model',{}).get('fingerprint'):
                     # Re-read the serialized result in a separate verifier process.
                     sol=raw/f'{name}.solution.json';sol.write_text(stdout)
                     verification_command=[a.binary,'verify',str(path),str(sol)]
@@ -132,7 +134,7 @@ def main():
                 if reported_status=='OPTIMAL' and verification_status not in accepted_verification:
                     status='VERIFICATION_FAILED'
                 perf=data.get('performance',{})
-                record=dict(instance=path.name,solver=solver,run=run,warmup=run<0,status=status,reported_status=reported_status,verification_status=verification_status,problem_type=inspect.get('type'),objective=data.get('objective'),primal_residual=accuracy.get('primal_residual'),dual_residual=accuracy.get('dual_residual'),kkt_error=accuracy.get('kkt_error'),iterations=perf.get('iterations'),end_to_end_seconds=perf.get('end_to_end_seconds'),iteration_seconds=perf.get('iteration_seconds'),process_wall_seconds=wall,rows=inspect.get('rows'),columns=inspect.get('columns'),nonzeros=inspect.get('nonzeros'),dataset_sha256=checksum,method_selected=data.get('selection',{}).get('method'),device_reason=data.get('selection',{}).get('reason'),monitor_checks=perf.get('monitor_checks'),host_candidate_checks=perf.get('host_candidate_checks'),skipped_candidate_checks=perf.get('skipped_candidate_checks'),mip_gap=data.get('mip',{}).get('relative_gap',data.get('mip_gap')),best_bound=data.get('mip',{}).get('best_bound',data.get('best_bound')),nodes=data.get('mip',{}).get('nodes',data.get('nodes')))
+                record=dict(instance=path.name,solver=solver,run=run,warmup=run<0,status=status,reported_status=reported_status,verification_status=verification_status,problem_type=inspect.get('type'),objective=data.get('objective'),primal_residual=accuracy.get('primal_residual'),dual_residual=accuracy.get('dual_residual'),kkt_error=accuracy.get('kkt_error'),iterations=perf.get('iterations'),end_to_end_seconds=perf.get('end_to_end_seconds'),iteration_seconds=perf.get('iteration_seconds'),process_wall_seconds=wall,rows=inspect.get('rows'),columns=inspect.get('columns'),nonzeros=inspect.get('nonzeros'),dataset_sha256=checksum,method_selected=data.get('selection',{}).get('method'),relaxation_method_selected=data.get('selection',{}).get('relaxation_method'),device_reason=data.get('selection',{}).get('reason'),monitor_checks=perf.get('monitor_checks'),host_candidate_checks=perf.get('host_candidate_checks'),skipped_candidate_checks=perf.get('skipped_candidate_checks'),mip_gap=data.get('mip',{}).get('relative_gap',data.get('mip_gap')),best_bound=data.get('mip',{}).get('best_bound',data.get('best_bound')),nodes=data.get('mip',{}).get('nodes',data.get('nodes')))
                 (raw/f'{name}.json').write_text(json.dumps(dict(record=record,command=command,exit_code=code,result=data),indent=2))
                 if run>=0:rows.append(record)
                 print(f"{path.name:24} {solver:6} run={run:2} {record['status']:18} objective={record['objective']} wall={wall:.4f}s",flush=True)

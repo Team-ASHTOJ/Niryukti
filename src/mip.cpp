@@ -669,6 +669,8 @@ Result solve_mip(const Model &original, const Options &options) {
         o.time_limit = std::max(0., options.time_limit - elapsed(start));
         o.verbose = false;
         auto r = solve_continuous(relaxation, o);
+        if (out.relaxation_method_selected.empty())
+            out.relaxation_method_selected = r.method_selected;
         // Bounds used to derive these cuts apply only to this node. They are discarded
         // on exit; only their certified relaxation lower bound is inherited by children.
         for (int round = 0; options.cuts && round < 2 && !stop_requested(options) &&

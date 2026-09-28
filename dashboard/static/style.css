@@ -669,3 +669,5 @@ td small{display:block;color:var(--muted);font:400 12px var(--font);margin-top:3
 .certificate-panel details p{font-size:12.5px;line-height:1.6;color:var(--muted)}
 .certificate-panel pre{max-height:440px;overflow:auto;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--sunken);font:11px/1.55 var(--mono);white-space:pre;tab-size:2}
 .certificate-panel .button{font-size:12.5px}
+
+.auto-solver-panel{padding:22px;margin:16px 0}.auto-solver-panel .eyebrow{color:var(--gold)}.auto-solver-panel .detail-dl{margin:12px 0}.auto-solver-panel .detail-dl dt{font-size:12px;color:var(--muted)}.auto-solver-panel .detail-dl dd{font-size:12px;overflow-wrap:anywhere}.auto-solver-panel .telemetry-note{margin:10px 0 0}

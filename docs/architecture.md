@@ -6,8 +6,10 @@ NIRYUKTI is the application identity; VANTAGE is the C++ library/binary namespac
 flowchart TD
     Input[MPS / LP / JSON / supported QPLIB] --> Model[Canonical sparse model]
     Model --> Classify[LP / convex QP / MILP / convex MIQP]
-    Classify --> Continuous[Continuous solver selection]
-    Classify --> Integer[Branch and cut]
+    Classify --> Advisor[Structural method / hardware advisor]
+    Advisor --> Configure[Selected method and backend]
+    Configure --> Continuous[Continuous solver selection]
+    Configure --> Integer[Branch and cut]
     Integer --> Continuous
     Continuous --> FOM[CPU / CUDA first-order methods]
     Continuous --> Simplex[CPU revised primal / dual simplex]
@@ -43,3 +45,5 @@ See [algorithm details](algorithms.md), [current limits and validation](solver_c
 
 See [certificate lifecycle, CLI/API, replay checks and limitations](certificates.md).
 Run `scripts/run_certificate_demo.sh` for an offline valid → invalid → valid demonstration.
+
+Auto selection and its analysis output are documented in [Auto Solver](auto_solver.md).

@@ -53,3 +53,8 @@ An explicitly separate iteration-budget experiment can be included without chang
 python3 benchmark/compare.py results/phase2-baseline results/phase2-final \
   --extended results/phase2-e226-extended
 ```
+
+
+## Automatic solver comparison
+
+The benchmark runner accepts `--solvers auto,cpu,cuda,highs`. `auto` uses the production advisor with `method=auto` and `device=auto`; CPU and CUDA use the `--method` argument and force their named backends. All attempts are retained, and NIRYUKTI results receive separate-process original-model verification. Compare status and verification before timing. Current checked-in datasets form a small smoke suite, CUDA may be unavailable, and no universal performance claim follows from it. See [Auto Solver benchmark instructions and limitations](auto_solver.md).

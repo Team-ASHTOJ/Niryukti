@@ -110,7 +110,7 @@ struct Result {
     int gpu_index_bits = 0;
     bool graph_execution = false;
     std::string matrix_precision = "fp64";
-    std::string method_selected, device_reason;
+    std::string method_selected, relaxation_method_selected, device_reason;
     double estimated_gpu_bytes = 0;
     int64_t pump_rounds = 0, rins_calls = 0, heuristic_nodes = 0;
 };

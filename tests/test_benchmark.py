@@ -16,9 +16,12 @@ class BenchmarkEvidence(unittest.TestCase):
             out=Path(folder)/'campaign'
             subprocess.run([sys.executable,str(ROOT/'benchmark/run.py'),str(ROOT/'examples/toy.lp'),
                             str(ROOT/'examples/integer_dispatch.json'),'--binary',str(binary),
-                            '--solvers','cpu','--method','auto','--runs','1','--output',str(out)],check=True,capture_output=True,text=True)
+                            '--solvers','auto,cpu','--method','auto','--runs','1','--output',str(out)],check=True,capture_output=True,text=True)
+            automatic=json.loads((out/'raw/000_toy_auto_0.json').read_text())
             continuous=json.loads((out/'raw/000_toy_cpu_0.json').read_text())
             integer=json.loads((out/'raw/001_integer_dispatch_cpu_0.json').read_text())
+            self.assertEqual(automatic['record']['verification_status'],'VERIFIED_OPTIMAL')
+            self.assertEqual(automatic['record']['method_selected'],'revised-primal-simplex')
             self.assertEqual(continuous['record']['verification_status'],'VERIFIED_OPTIMAL')
             self.assertEqual(integer['record']['verification_status'],'VERIFIED_FEASIBLE')
             self.assertEqual(continuous['result']['verification_process']['exit_code'],0)

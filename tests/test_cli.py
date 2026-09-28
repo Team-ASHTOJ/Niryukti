@@ -15,6 +15,45 @@ def run(*args):return subprocess.run([binary,*map(str,args)],text=True,capture_o
 with tempfile.TemporaryDirectory(prefix='vantage-cli-tests-') as tmp:
     tmp=Path(tmp);sol=tmp/'solution.json'
     qplib=tmp/'parsed.json'
+    # Auto dry-run and analyze expose deterministic, machine-readable choices.
+    analysis=run('analyze',root/'examples/toy.lp','--device','cpu')
+    assert analysis.returncode==0,analysis.stderr
+    analyzed=json.loads(analysis.stdout)['analysis']
+    assert analyzed['problem_class']=='LP' and analyzed['selection']['device']=='cpu'
+    assert analyzed['model']['variables']==2 and analyzed['model']['nonzeros']==2
+    dry=run('solve',root/'examples/toy.lp','--auto','--device','cpu','--dry-run')
+    assert dry.returncode==0,dry.stderr
+    dry_json=json.loads(dry.stdout)
+    assert dry_json['mode']=='auto' and dry_json['selection']['device']=='cpu'
+    auto_result=run('solve',root/'examples/toy.lp','--auto','--device','cpu')
+    assert auto_result.returncode==0,auto_result.stderr
+    auto_json=json.loads(auto_result.stdout)
+    assert auto_json['selection']['automatic'] and auto_json['selection']['device']=='cpu'
+    assert auto_json['selection']['method']=='revised-primal-simplex'
+    assert auto_json['verification_certificate']['verification']['valid']
+    qp=run('analyze',root/'examples/coupled_dispatch.json','--device','cpu')
+    assert qp.returncode==0,qp.stderr
+    qp_data=json.loads(qp.stdout)['analysis']
+    assert qp_data['problem_class']=='QP'
+    assert qp_data['model']['quadratic_off_diagonal_terms']>0
+    milp=run('analyze',root/'examples/integer_dispatch.json','--device','cpu')
+    assert json.loads(milp.stdout)['analysis']['problem_class']=='MIQP'
+    actual_milp=run('solve',root/'examples/supply_chain.json','--auto','--device','cpu')
+    assert actual_milp.returncode==0,actual_milp.stderr
+    actual_mip=json.loads(actual_milp.stdout)
+    assert actual_mip['selection']['method']=='branch-and-bound'
+    assert actual_mip['selection']['relaxation_method']=='revised-primal-simplex'
+    assert actual_mip['selection']['configuration']['branching']=='fractional'
+    assert actual_mip['selection']['configuration']['cuts_enabled'] is False
+    miqp_path=tmp/'miqp-analysis.json'
+    miqp_data=json.loads((root/'examples/coupled_dispatch.json').read_text())
+    miqp_data['variables'][0].update(type='binary',lb=0,ub=1)
+    for variable in miqp_data['variables'][1:]:variable['type']='integer'
+    miqp_path.write_text(json.dumps(miqp_data))
+    miqp=run('analyze',miqp_path,'--device','cpu')
+    assert miqp.returncode==0,miqp.stderr
+    miqp_result=json.loads(miqp.stdout)['analysis']
+    assert miqp_result['problem_class']=='MIQP' and miqp_result['model']['binary_variables']==1
     r=run('convert',root/'examples/toy.qplib',qplib);assert r.returncode==0,r.stderr
     r=run('solve',qplib);assert r.returncode==0,r.stderr
     qdata=json.loads(r.stdout);assert qdata['status']=='OPTIMAL'

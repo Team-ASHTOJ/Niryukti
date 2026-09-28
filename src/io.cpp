@@ -949,6 +949,7 @@ std::string result_json(const Model &m, const Result &r) {
     if (!r.basis.empty())
         j["basis"] = {{"indices", r.basis}, {"fingerprint", r.basis_fingerprint}};
     j["selection"] = {{"method", r.method_selected},
+                      {"relaxation_method", r.relaxation_method_selected},
                       {"device", r.backend},
                       {"reason", r.device_reason},
                       {"estimated_gpu_bytes", r.estimated_gpu_bytes}};

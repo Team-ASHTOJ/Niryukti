@@ -88,6 +88,10 @@ class DashboardTests(unittest.TestCase):
         certificate=self.get('/api/runs/certificate-test/certificate')
         self.assertTrue(certificate['verification']['valid'])
         self.assertEqual(self.get('/api/runs/certificate-test/verification_report'),certificate['verification'])
+        script=(server.STATIC/'app.js').read_text()
+        self.assertIn('function autoSolverView',script)
+        self.assertIn('s.relaxation_method',script)
+        self.assertIn('<select name="method"><option value="pdhg" selected>Adaptive PDHG</option>',script)
 
     def test_documentation_download_is_allowlisted(self):
         folder=server.ROOT/'docs';folder.mkdir(exist_ok=True)

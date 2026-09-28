@@ -28,3 +28,5 @@ Raw run files remain in `results/`; generated results are not automatically vers
 
 See [certificate lifecycle, CLI/API, replay checks and limitations](certificates.md).
 Run `scripts/run_certificate_demo.sh` for an offline valid → invalid → valid demonstration.
+
+| [Auto Solver](auto_solver.md) | Existing method/device advisor, structural analysis, dry-run and policy limits |

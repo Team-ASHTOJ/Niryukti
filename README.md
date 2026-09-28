@@ -234,3 +234,7 @@ Run `scripts/run_certificate_demo.sh` for an offline valid → invalid → valid
 Current implementation and remaining work: [2026-09-28 record](docs/improvements_20260928.md).
 
 GPU restart, propagation and conflict updates: [implementation and limits](docs/gpu_conflicts_20260928.md).
+
+## Automatic solver selection
+
+Use `niryukti solve model.mps --auto` or `niryukti solve model.mps --auto --dry-run` to inspect the same structural policy used by solves. See [Auto Solver policy, configuration, and benchmark instructions](docs/auto_solver.md).

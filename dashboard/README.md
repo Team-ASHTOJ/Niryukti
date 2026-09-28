@@ -56,3 +56,5 @@ The overview and reference page describe implemented methods, checkpoint state a
 
 See [certificate lifecycle, CLI/API, replay checks and limitations](../docs/certificates.md).
 Run `scripts/run_certificate_demo.sh` for an offline valid → invalid → valid demonstration.
+
+The solve form defaults to automatic device selection and the existing PDHG convergence-trace method; automatic method selection remains available in Algorithm controls. Its Auto Solver panel shows the actual backend, selected method (including the MILP relaxation method), run configuration, advisor reason, and certificate verification status.

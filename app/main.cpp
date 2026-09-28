@@ -6,13 +6,94 @@
 #include <iostream>
 #include <stdexcept>
 using namespace vantage;
+namespace {
+nlohmann::json analyze_model(const Model &m, const Options &o) {
+    auto hardware = hardware_info();
+    auto advice = advise_model(m, o, hardware);
+    int64_t binary = 0, integer = 0, bounded = 0, fixed = 0;
+    for (size_t j = 0; j < m.c.size(); ++j) {
+        binary += m.types[j] == VarType::Binary;
+        integer += m.types[j] != VarType::Continuous;
+        bounded += std::isfinite(m.lb[j]) && std::isfinite(m.ub[j]);
+        fixed += m.lb[j] == m.ub[j];
+    }
+    int64_t equalities = 0, ranged = 0;
+    for (size_t i = 0; i < m.rl.size(); ++i) {
+        equalities += m.rl[i] == m.ru[i];
+        ranged += std::isfinite(m.rl[i]) && std::isfinite(m.ru[i]) && m.rl[i] != m.ru[i];
+    }
+    double min_a = inf, max_a = 0;
+    for (double a : m.A.value) if (a != 0) {
+        min_a = std::min(min_a, std::abs(a));
+        max_a = std::max(max_a, std::abs(a));
+    }
+    int64_t q_diagonal = 0, q_off_diagonal = 0;
+    auto diagonal = m.q;
+    for (size_t i = 0; i < m.Q.rows; ++i)
+        for (auto k = m.Q.ptr[i]; k < m.Q.ptr[i + 1]; ++k)
+            if (m.Q.index[k] == int64_t(i)) diagonal[i] += m.Q.value[k];
+            else if (m.Q.index[k] > int64_t(i)) q_off_diagonal += m.Q.value[k] != 0;
+    for (double q : diagonal) q_diagonal += q != 0;
+    // Connected components of the variable incidence graph describe block structure;
+    // this analysis does not reorder or decompose the optimization problem.
+    std::vector<int64_t> parent(m.c.size());
+    for (size_t j = 0; j < parent.size(); ++j) parent[j] = int64_t(j);
+    auto root = [&](int64_t j) { while (parent[j] != j) { parent[j] = parent[parent[j]]; j = parent[j]; } return j; };
+    auto join = [&](int64_t a, int64_t b) { a=root(a); b=root(b); if (a!=b) parent[b]=a; };
+    for (int64_t i = 0; i < m.A.rows; ++i)
+        for (auto k = m.A.ptr[i] + 1; k < m.A.ptr[i + 1]; ++k)
+            join(m.A.index[m.A.ptr[i]],m.A.index[k]);
+    for (size_t i = 0; i < m.Q.rows; ++i)
+        for (auto k = m.Q.ptr[i]; k < m.Q.ptr[i + 1]; ++k)
+            if (m.Q.index[k] > int64_t(i)) join(int64_t(i),m.Q.index[k]);
+    int64_t components = 0;
+    for (size_t j = 0; j < parent.size(); ++j) components += root(int64_t(j)) == int64_t(j);
+    long double cells = static_cast<long double>(m.A.rows) * m.A.cols;
+    double density = cells > 0 ? double(m.A.value.size() / cells) : 0;
+    long double csr_bytes = static_cast<long double>(m.A.value.size()) * (sizeof(double)+sizeof(int64_t)) +
+                            static_cast<long double>(m.A.rows+1) * sizeof(int64_t);
+    long double dense_bytes = cells * sizeof(double);
+    bool csr_smaller = dense_bytes == 0 || csr_bytes < dense_bytes;
+    int64_t continuous = int64_t(m.c.size()) - integer;
+    std::string type = m.is_mip() ? (m.is_qp() ? "MIQP" : "MILP") : (m.is_qp() ? "QP" : "LP");
+    std::string algorithm = advice.method;
+    if (m.is_mip()) algorithm = std::string(o.cuts ? "branch-and-cut with " : "branch-and-bound with ") + advice.method + " relaxations";
+    return {{"mode", (o.method == "auto" || o.device == "auto") ? "auto" : "explicit"},
+        {"problem_class", type},
+        {"model", {{"variables",m.c.size()},{"constraints",m.A.rows},{"nonzeros",m.A.value.size()},
+                   {"integer_variables",integer},{"binary_variables",binary},{"continuous_variables",continuous},
+                   {"bounded_variables",bounded},{"fixed_variables",fixed},{"equality_constraints",equalities},
+                   {"ranged_constraints",ranged},{"quadratic_diagonal_terms",q_diagonal},
+                   {"quadratic_off_diagonal_terms",q_off_diagonal},{"matrix_density",density},
+                   {"matrix_coefficients",{{"minimum_absolute",std::isfinite(min_a)?nlohmann::json(min_a):nlohmann::json()},
+                                             {"maximum_absolute",max_a},
+                                             {"range",std::isfinite(min_a)&&min_a>0?max_a/min_a:1.0}}},
+                   {"incidence_components",components},{"incidence_components_are_solver_decomposition",false},
+                   {"csr_uses_less_estimated_storage_than_dense",csr_smaller}}},
+        {"hardware",{{"cpu","available"},{"cuda_available",hardware.gpu_available},
+                      {"cuda_description",cuda_description()},
+                      {"free_gpu_bytes",hardware.free_gpu_bytes},{"total_gpu_bytes",hardware.total_gpu_bytes}}},
+        {"selection",{{"device",advice.device},{"method",advice.method},{"algorithm",algorithm},
+                       {"reason",advice.reason},{"estimated_gpu_bytes",advice.estimated_gpu_bytes},
+                       {"profile","none"}}},
+        {"configuration",{{"scaling",o.scaling},{"scaling_passes",o.scaling_passes},
+                           {"branching",o.branching},{"node_selection",o.node_selection},
+                           {"cuts_enabled",o.cuts},{"primal_heuristic",o.primal_heuristic},
+                           {"precision",o.matrix_precision},{"tolerance",o.tol},
+                           {"time_limit_seconds",o.time_limit},{"iteration_limit",o.iteration_limit},
+                           {"node_limit",o.node_limit},{"presolve",o.presolve}}},
+        {"reasons",nlohmann::json::array({advice.reason})},
+        {"runtime_estimate",nullptr},
+        {"verification_path",m.is_mip()?"original-model incumbent feasibility, integrality, objective, and available replayable relaxation bound"
+                                      :"original-model feasibility, objective consistency, stationarity and KKT checks"}};
+}
+}
 int main(int argc, char **argv) {
     std::signal(SIGINT, [](int) { interrupted = 1; });
     try {
         if (argc < 2) {
             std::cout
-                << "NIRYUKTI 0.2 — Independent Sparse Optimization Engine\nCommands: solve MODEL, "
-                   "inspect MODEL, explain MODEL, session MODEL, "
+                << "NIRYUKTI 0.2 — Independent Sparse Optimization Engine\nCommands: solve MODEL, analyze MODEL, inspect MODEL, explain MODEL, session MODEL, "
                    "verify MODEL SOLUTION, convert INPUT OUTPUT, devices\nSolve: --device "
                    "cpu|cuda|auto --tol 1e-6 --time-limit 60 --iterations 100000\n       "
                    "--json-out result.json --warm-start result.json --threads 1 --verbose\n  "
@@ -28,6 +109,7 @@ int main(int argc, char **argv) {
                    "repair|pump|rins|local|all\n"
                    "       --checkpoint-out state.json --checkpoint-nodes 100 --resume state.json\n"
                    "       --gpu-presolve --batch-strong-branching\n"
+                   "       --auto (alias for --method auto) --dry-run\n"
                    "       halpern: experimental CPU/CUDA LP, requires --no-adaptive\n";
             return 0;
         }
@@ -43,7 +125,7 @@ int main(int argc, char **argv) {
         auto m = read_model(argv[2]);
         double parse_seconds =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - parse_start).count();
-        if (cmd == "inspect" || cmd == "explain") {
+        if (cmd == "inspect" || cmd == "explain" || cmd == "analyze") {
             nlohmann::json j = {
                 {"name", m.name},
                 {"type", m.is_mip()  ? (m.is_qp() ? "MIQP" : "MILP")
@@ -55,10 +137,40 @@ int main(int argc, char **argv) {
                 {"fingerprint", m.fingerprint()},
                 {"gpu_storage_estimate_bytes",
                  48. * (m.A.value.size() + m.Q.value.size()) + 240. * (m.A.rows + m.A.cols + 2)}};
-            if (cmd == "explain") {
-                Options automatic; automatic.method = "auto";
+            Options automatic; automatic.method = "auto";
+            automatic.device = "auto";
+            if (cmd == "analyze") {
+                for (int i = 3; i < argc; ++i) {
+                    std::string flag = argv[i];
+                    if (flag == "--auto") { automatic.method = "auto"; continue; }
+                    if (flag == "--cuts") { automatic.cuts = true; continue; }
+                    if (flag == "--no-presolve") { automatic.presolve = false; continue; }
+                    if (i + 1 >= argc) throw std::runtime_error("Missing option value for " + flag);
+                    std::string value = argv[++i];
+                    if (flag == "--device") automatic.device = value;
+                    else if (flag == "--method") automatic.method = value;
+                    else if (flag == "--scaling") automatic.scaling = value;
+                    else if (flag == "--branching") automatic.branching = value;
+                    else if (flag == "--node-selection") automatic.node_selection = value;
+                    else if (flag == "--primal-heuristic") automatic.primal_heuristic = value;
+                    else if (flag == "--matrix-precision") automatic.matrix_precision = value;
+                    else if (flag == "--tol") automatic.tol = std::stod(value);
+                    else if (flag == "--time-limit") automatic.time_limit = std::stod(value);
+                    else if (flag == "--iterations") automatic.iteration_limit = std::stoll(value);
+                    else if (flag == "--node-limit") automatic.node_limit = std::stoll(value);
+                    else if (flag == "--scaling-passes") automatic.scaling_passes = std::stoi(value);
+                    else throw std::runtime_error("Unsupported analyze option: " + flag);
+                }
+                if (automatic.device != "auto" && automatic.device != "cpu" && automatic.device != "cuda" && automatic.device != "hip")
+                    throw std::runtime_error("Unknown device");
+                const std::vector<std::string> valid_methods={"auto","simplex","dual-simplex","barrier","concurrent","pdhg","halpern","rhpdhg","r2hpdhg"};
+                if(std::find(valid_methods.begin(),valid_methods.end(),automatic.method)==valid_methods.end())
+                    throw std::runtime_error("Unknown method");
+            }
+            if (cmd != "inspect") {
                 auto hardware = hardware_info();
                 auto advisor = advise_model(m, automatic, hardware);
+                j["analysis"] = analyze_model(m, automatic);
                 j["automatic_selection"] = {{"method", advisor.method}, {"device", advisor.device},
                     {"reason", advisor.reason}, {"available_gpu_bytes", hardware.free_gpu_bytes},
                     {"estimated_gpu_bytes", advisor.estimated_gpu_bytes},
@@ -67,12 +179,7 @@ int main(int argc, char **argv) {
                     {"newton_fill_estimate", advisor.newton_fill_estimate},
                     {"policy", "deterministic structural heuristic; no performance guarantee"}};
 
-                j["method"] =
-                    m.is_mip() ? "Best-bound branch-and-bound using NIRYUKTI PDHG relaxations"
-                    : m.is_qp()
-                        ? (!m.Q.value.empty() ? "Smooth primal-dual splitting with sparse Q*x"
-                                              : "PDHG with diagonal quadratic proximal step")
-                        : "Restarted PDHG";
+                j["method"] = j["analysis"]["selection"]["algorithm"];
                 j["gpu_suitability_heuristic"] =
                     m.A.value.size() >= 100000 ? "Worth measuring CPU/GPU crossover"
                                                : "Low: launch and transfer overhead may dominate";
@@ -124,8 +231,11 @@ int main(int argc, char **argv) {
                 j["recommended_configuration"] = {
                     {"method", advisor.method},
                     {"device", advisor.device},
-                    {"branching",
-                     m.is_mip() ? "reliability (opt-in; benchmark first)" : "not applicable"}};
+                    {"branching", automatic.branching},
+                    {"cuts", automatic.cuts},
+                    {"primal_heuristic", automatic.primal_heuristic},
+                    {"scaling", automatic.scaling},
+                    {"precision", automatic.matrix_precision}};
                 j["advisor_scope"] =
                     "Structural rule-based guidance, not a learned runtime prediction";
             }
@@ -192,7 +302,7 @@ int main(int argc, char **argv) {
         Options o;
         o.method = "auto";
         std::string output, warm, certificate_output;
-        bool allow_model_change = false;
+        bool allow_model_change = false, dry_run = false;
         for (int i = 3; i < argc; i++) {
             std::string a = argv[i];
             auto val = [&]() {
@@ -200,7 +310,11 @@ int main(int argc, char **argv) {
                     throw std::runtime_error("Missing option value for " + a);
                 return std::string(argv[i]);
             };
-            if (a == "--device")
+            if (a == "--auto")
+                o.method = "auto";
+            else if (a == "--dry-run")
+                dry_run = true;
+            else if (a == "--device")
                 o.device = val();
             else if (a == "--tol")
                 o.tol = std::stod(val());
@@ -275,6 +389,10 @@ int main(int argc, char **argv) {
             else
                 throw std::runtime_error("Unknown option: " + a);
         }
+        if (dry_run) {
+            std::cout << analyze_model(m, o).dump(2) << '\n';
+            return 0;
+        }
         if (!warm.empty()) {
             auto r = read_solution(m, warm, allow_model_change);
             o.initial_x = r.x;
@@ -285,6 +403,13 @@ int main(int argc, char **argv) {
         auto r = solve(m, o);
         auto j = nlohmann::json::parse(result_json(m, r));
         j["performance"]["parse_seconds"] = parse_seconds;
+        j["selection"]["requested_method"] = o.method;
+        j["selection"]["automatic"] = (o.method == "auto" || o.device == "auto");
+        j["selection"]["configuration"] = {{"scaling",o.scaling},{"branching",o.branching},
+            {"node_selection",o.node_selection},{"scaling_passes",o.scaling_passes},{"cuts_enabled",o.cuts},
+            {"primal_heuristic",o.primal_heuristic},{"precision",o.matrix_precision},
+            {"tolerance",o.tol},{"time_limit_seconds",o.time_limit},
+            {"iteration_limit",o.iteration_limit},{"node_limit",o.node_limit}};
         j["performance"]["end_to_end_seconds"] = r.seconds + parse_seconds;
         j["options"] = {{"tolerance", o.tol},
                         {"time_limit", o.time_limit},
