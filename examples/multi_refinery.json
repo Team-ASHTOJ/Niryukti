@@ -1,0 +1,298 @@
+{
+ "name": "multi_refinery_4",
+ "sense": "min",
+ "variables": [
+  {
+   "name": "crude_0_0",
+   "lb": 0,
+   "ub": 200
+  },
+  {
+   "name": "crude_0_1",
+   "lb": 0,
+   "ub": 200
+  },
+  {
+   "name": "crude_0_2",
+   "lb": 0,
+   "ub": 200
+  },
+  {
+   "name": "make_0_0",
+   "lb": 0,
+   "ub": 400
+  },
+  {
+   "name": "make_0_1",
+   "lb": 0,
+   "ub": 400
+  },
+  {
+   "name": "crude_1_0",
+   "lb": 0,
+   "ub": 200
+  },
+  {
+   "name": "crude_1_1",
+   "lb": 0,
+   "ub": 200
+  },
+  {
+   "name": "crude_1_2",
+   "lb": 0,
+   "ub": 200
+  },
+  {
+   "name": "make_1_0",
+   "lb": 0,
+   "ub": 400
+  },
+  {
+   "name": "make_1_1",
+   "lb": 0,
+   "ub": 400
+  },
+  {
+   "name": "crude_2_0",
+   "lb": 0,
+   "ub": 200
+  },
+  {
+   "name": "crude_2_1",
+   "lb": 0,
+   "ub": 200
+  },
+  {
+   "name": "crude_2_2",
+   "lb": 0,
+   "ub": 200
+  },
+  {
+   "name": "make_2_0",
+   "lb": 0,
+   "ub": 400
+  },
+  {
+   "name": "make_2_1",
+   "lb": 0,
+   "ub": 400
+  },
+  {
+   "name": "crude_3_0",
+   "lb": 0,
+   "ub": 200
+  },
+  {
+   "name": "crude_3_1",
+   "lb": 0,
+   "ub": 200
+  },
+  {
+   "name": "crude_3_2",
+   "lb": 0,
+   "ub": 200
+  },
+  {
+   "name": "make_3_0",
+   "lb": 0,
+   "ub": 400
+  },
+  {
+   "name": "make_3_1",
+   "lb": 0,
+   "ub": 400
+  }
+ ],
+ "objective": {
+  "linear": [
+   58.96,
+   69.13,
+   59.25,
+   1.18,
+   2.7,
+   60.230000000000004,
+   71.19,
+   56.309999999999995,
+   2.76,
+   1.15,
+   56.730000000000004,
+   72.84,
+   57.68,
+   1.43,
+   1.35,
+   59.81,
+   71.78,
+   56.559999999999995,
+   2.71,
+   1.56
+  ]
+ },
+ "constraints": [
+  {
+   "name": "yield_0_0",
+   "ub": 0,
+   "coefficients": {
+    "make_0_0": 1,
+    "crude_0_0": -0.33,
+    "crude_0_1": -0.46,
+    "crude_0_2": -0.414
+   }
+  },
+  {
+   "name": "yield_0_1",
+   "ub": 0,
+   "coefficients": {
+    "make_0_1": 1,
+    "crude_0_0": -0.26,
+    "crude_0_1": -0.229,
+    "crude_0_2": -0.346
+   }
+  },
+  {
+   "name": "cdu_0",
+   "ub": 220,
+   "coefficients": {
+    "crude_0_0": 1,
+    "crude_0_1": 1,
+    "crude_0_2": 1
+   }
+  },
+  {
+   "name": "yield_1_0",
+   "ub": 0,
+   "coefficients": {
+    "make_1_0": 1,
+    "crude_1_0": -0.33,
+    "crude_1_1": -0.46,
+    "crude_1_2": -0.414
+   }
+  },
+  {
+   "name": "yield_1_1",
+   "ub": 0,
+   "coefficients": {
+    "make_1_1": 1,
+    "crude_1_0": -0.26,
+    "crude_1_1": -0.229,
+    "crude_1_2": -0.346
+   }
+  },
+  {
+   "name": "cdu_1",
+   "ub": 180,
+   "coefficients": {
+    "crude_1_0": 1,
+    "crude_1_1": 1,
+    "crude_1_2": 1
+   }
+  },
+  {
+   "name": "yield_2_0",
+   "ub": 0,
+   "coefficients": {
+    "make_2_0": 1,
+    "crude_2_0": -0.33,
+    "crude_2_1": -0.46,
+    "crude_2_2": -0.414
+   }
+  },
+  {
+   "name": "yield_2_1",
+   "ub": 0,
+   "coefficients": {
+    "make_2_1": 1,
+    "crude_2_0": -0.26,
+    "crude_2_1": -0.229,
+    "crude_2_2": -0.346
+   }
+  },
+  {
+   "name": "cdu_2",
+   "ub": 180,
+   "coefficients": {
+    "crude_2_0": 1,
+    "crude_2_1": 1,
+    "crude_2_2": 1
+   }
+  },
+  {
+   "name": "yield_3_0",
+   "ub": 0,
+   "coefficients": {
+    "make_3_0": 1,
+    "crude_3_0": -0.33,
+    "crude_3_1": -0.46,
+    "crude_3_2": -0.414
+   }
+  },
+  {
+   "name": "yield_3_1",
+   "ub": 0,
+   "coefficients": {
+    "make_3_1": 1,
+    "crude_3_0": -0.26,
+    "crude_3_1": -0.229,
+    "crude_3_2": -0.346
+   }
+  },
+  {
+   "name": "cdu_3",
+   "ub": 220,
+   "coefficients": {
+    "crude_3_0": 1,
+    "crude_3_1": 1,
+    "crude_3_2": 1
+   }
+  },
+  {
+   "name": "jetty_0",
+   "ub": 260,
+   "coefficients": {
+    "crude_0_0": 1,
+    "crude_1_0": 1,
+    "crude_2_0": 1,
+    "crude_3_0": 1
+   }
+  },
+  {
+   "name": "jetty_1",
+   "ub": 260,
+   "coefficients": {
+    "crude_0_1": 1,
+    "crude_1_1": 1,
+    "crude_2_1": 1,
+    "crude_3_1": 1
+   }
+  },
+  {
+   "name": "jetty_2",
+   "ub": 260,
+   "coefficients": {
+    "crude_0_2": 1,
+    "crude_1_2": 1,
+    "crude_2_2": 1,
+    "crude_3_2": 1
+   }
+  },
+  {
+   "name": "demand_0",
+   "lb": 180,
+   "coefficients": {
+    "make_0_0": 1,
+    "make_1_0": 1,
+    "make_2_0": 1,
+    "make_3_0": 1
+   }
+  },
+  {
+   "name": "demand_1",
+   "lb": 180,
+   "coefficients": {
+    "make_0_1": 1,
+    "make_1_1": 1,
+    "make_2_1": 1,
+    "make_3_1": 1
+   }
+  }
+ ]
+}

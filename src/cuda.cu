@@ -1327,7 +1327,7 @@ __global__ void linear_sum(int64_t n, const double *partial, double *result) {
         *result = sum;
 }
 std::vector<double> cuda_linear_solve(const Sparse &matrix, const std::vector<double> &rhs,
-                                      const Options &o) {
+                                      const Options &o, bool fp32_matrix, double tolerance) {
     if (matrix.rows != matrix.cols || rhs.size() != size_t(matrix.rows))
         throw std::runtime_error("Newton matrix dimensions");
     const size_t n = rhs.size();
@@ -1336,7 +1336,7 @@ std::vector<double> cuda_linear_solve(const Sparse &matrix, const std::vector<do
     Stream stream;
     Handle handle;
     sparse_check(cusparseSetStream(handle.h, stream.value), "Newton stream");
-    Matrix a(matrix, "auto", false);
+    Matrix a(matrix, "auto", fp32_matrix);
     Buffer<double> x(n), r(rhs), anchor(rhs), p(n), v(n), s(n), t(n), partial((n + 255) / 256),
         scalar(1);
     x.zero();
@@ -1382,7 +1382,8 @@ std::vector<double> cuda_linear_solve(const Sparse &matrix, const std::vector<do
         return value;
     };
     double norm = std::sqrt(dot(r.p, r.p));
-    double target = 1e-10 * (1 + norm);
+    // An FP32 operator cannot reach FP64 residual targets; the outer refinement does.
+    double target = (fp32_matrix ? 1e-6 : 1e-10) * (1 + norm);
     double previous = 1, alpha = 1, omega = 1;
     auto start = Clock::now();
     bool converged = norm <= target;
@@ -1427,7 +1428,7 @@ std::vector<double> cuda_linear_solve(const Sparse &matrix, const std::vector<do
         error = std::max(error, std::abs((long double)activity[j] - rhs[j]));
         rhsnorm = std::max(rhsnorm, std::abs((long double)rhs[j]));
     }
-    if (!converged || error > 1e-7L * (1 + rhsnorm))
+    if (!converged || error > (long double)tolerance * (1 + rhsnorm))
         throw std::runtime_error("GPU Newton residual/breakdown check failed");
     return solution;
 }

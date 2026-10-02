@@ -59,6 +59,10 @@ struct Options {
          gpu_presolve = false;
     std::string gpu_indices = "auto", matrix_precision = "fp64";
     std::string primal_heuristic = "repair", node_selection = "best-bound";
+    // Barrier Newton systems: "fp64" or "mixed" (FP32 factor/matrix + FP64 refinement).
+    std::string newton_precision = "fp64";
+    // Learned branching: JSON weights for --branching gnn (built-in defaults when empty).
+    std::string branching_model;
 };
 struct Hardware {
     bool gpu_available = false;
@@ -114,6 +118,8 @@ struct Result {
     std::string method_selected, relaxation_method_selected, device_reason;
     double estimated_gpu_bytes = 0;
     int64_t pump_rounds = 0, rins_calls = 0, heuristic_nodes = 0;
+    int64_t mixed_precision_solves = 0, refinement_steps = 0, precision_fallbacks = 0;
+    double worst_refined_residual = 0;
 };
 Model read_model(const std::string &path);
 void write_model(const Model &, const std::string &path);

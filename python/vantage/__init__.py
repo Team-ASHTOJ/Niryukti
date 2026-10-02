@@ -92,6 +92,9 @@ from .planning import SolverSession, diagnose_infeasibility, propose_repair
 from .native import NativeSession
 from .sensitivity import rhs_sensitivity
 from .stability import stable_plan_model, replan
+from .analysis import sensitivity, find_iis, solve_global, recommend, decompose
+from .differentiable import differentiate, torch_lp_layer, lp_parameters
+from .language import translate, translate_file, TranslationError
 
 
 def verify_certificate(model, certificate, *, binary=None):

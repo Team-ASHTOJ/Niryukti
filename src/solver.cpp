@@ -39,8 +39,8 @@ void validate_options(const Options &o) {
     if (o.node_selection != "best-bound" && o.node_selection != "depth-first" &&
         o.node_selection != "best-estimate")
         throw std::runtime_error("Unknown node selection policy");
-    if (o.branching != "fractional" && o.branching != "reliability")
-        throw std::runtime_error("Unknown branching: use fractional or reliability");
+    if (o.branching != "fractional" && o.branching != "reliability" && o.branching != "gnn")
+        throw std::runtime_error("Unknown branching: use fractional, reliability or gnn");
     if (o.gpu_indices != "auto" && o.gpu_indices != "32" && o.gpu_indices != "64")
         throw std::runtime_error("GPU indices must be auto, 32 or 64");
     if (o.matrix_precision != "fp64" && o.matrix_precision != "mixed")
@@ -49,6 +49,8 @@ void validate_options(const Options &o) {
         throw std::runtime_error("CUDA graphs and mixed matrix precision require a CUDA backend");
     if (anchored_method(o) && o.matrix_precision == "mixed")
         throw std::runtime_error("Fixed Halpern operators require FP64 matrices");
+    if (o.newton_precision != "fp64" && o.newton_precision != "mixed")
+        throw std::runtime_error("Newton precision must be fp64 or mixed");
 }
 Result solve(const Model &m, const Options &o) {
     auto overall_start = Clock::now();

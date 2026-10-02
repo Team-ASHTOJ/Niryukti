@@ -1,9 +1,12 @@
 #include "json.hpp"
 #include "vantage/vantage.hpp"
+#include "vantage/analysis.hpp"
 #include "session.hpp"
+#include "../src/gnn.hpp"
 #include <chrono>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 using namespace vantage;
 namespace {
@@ -88,6 +91,38 @@ nlohmann::json analyze_model(const Model &m, const Options &o) {
         {"verification_path",m.is_mip()?"original-model incumbent feasibility, integrality, objective, and available replayable relaxation bound"
                                       :"original-model feasibility, objective consistency, stationarity and KKT checks"}};
 }
+// Three-state assurance badge derived only from independently verified quantities.
+nlohmann::json assurance(const Model &m, const Result &r, const Options &o) {
+    const auto &a = r.accuracy;
+    auto value = [](double v) { return std::isfinite(v) ? nlohmann::json(v) : nlohmann::json(); };
+    if (r.status == "INFEASIBLE" && !r.infeasibility_ray.empty() && r.certificate_margin > 0)
+        return {{"state","CERTIFIED_INFEASIBLE"},{"color","green"},
+                {"meaning","Verified Farkas certificate proves no feasible plan exists"}};
+    bool feasible = a.finite && a.primal <= 1e-6 && a.integrality <= 1e-6;
+    if (!feasible)
+        return {{"state","UNVERIFIED"},{"color","red"},
+                {"meaning","No independently verified feasible plan"}};
+    double incumbent = a.objective;
+    double bound = m.is_mip() ? r.best_bound : a.lower_bound;
+    double gap = std::isfinite(bound) ? std::max(0., incumbent - bound) : inf;
+    double allowed = std::max(1e-9, (m.is_mip() ? o.mip_gap : o.tol) * std::max(1., std::abs(incumbent)));
+    nlohmann::json badge = {{"objective",m.sense*incumbent},
+                            {m.sense > 0 ? "lower_bound" : "upper_bound", std::isfinite(bound) ? value(m.sense*bound) : nlohmann::json()},
+                            {"unverified_gap", value(gap)}};
+    if (!m.is_mip() && r.status == "OPTIMAL" && a.kkt <= o.tol && gap <= allowed) {
+        badge["state"] = "CERTIFIED_OPTIMAL"; badge["color"] = "green";
+        badge["meaning"] = "Independent KKT checks pass and the verified dual bound meets the plan";
+    } else if (std::isfinite(gap)) {
+        badge["state"] = "BOUNDED"; badge["color"] = "amber";
+        badge["meaning"] = m.is_mip()
+            ? "Verified incumbent; the tree bound limits how much better any plan can be (tree not replayed)"
+            : "Verified feasible plan with a verified dual bound";
+    } else {
+        badge["state"] = "FEASIBLE_ONLY"; badge["color"] = "red";
+        badge["meaning"] = "Verified feasible plan without a valid bound";
+    }
+    return badge;
+}
 }
 int main(int argc, char **argv) {
     std::signal(SIGINT, [](int) { interrupted = 1; });
@@ -95,7 +130,11 @@ int main(int argc, char **argv) {
         if (argc < 2) {
             std::cout
                 << "NIRYUKTI 0.2 — Independent Sparse Optimization Engine\nCommands: solve MODEL, analyze MODEL, inspect MODEL, explain MODEL, session MODEL, "
-                   "verify MODEL SOLUTION, convert INPUT OUTPUT, devices\nSolve: --device "
+                   "verify MODEL SOLUTION, convert INPUT OUTPUT, devices\n"
+                   "          sensitivity MODEL [SOLUTION], iis MODEL, global BILINEAR.json,\n"
+                   "          recommend MODEL --history FILE, decompose MODEL [--linking ROWS],\n"
+                   "          train-branching OUT.json MODEL... [--dives N --epochs N],\n"
+                   "          differentiate MODEL [--upstream grad.json --samples K --sigma S]\nSolve: --device "
                    "cpu|cuda|auto --tol 1e-6 --time-limit 60 --iterations 100000\n       "
                    "--json-out result.json --warm-start result.json --threads 1 --verbose\n  "
                    "     --no-presolve --scaling-passes 5 --no-restart --no-adaptive\n       "
@@ -104,13 +143,15 @@ int main(int argc, char **argv) {
                    "auto|simplex|dual-simplex|barrier|concurrent|pdhg|halpern|rhpdhg|r2hpdhg\n"
                    "       --primal-weight displacement|pid --power-iterations 0 --polishing\n"
                    "       --cuda-graphs --gpu-indices auto|32|64 --matrix-precision fp64|mixed\n"
+                   "       --newton-precision fp64|mixed (barrier FP32 factor + FP64 refinement)\n"
                    "       --gpu-monitor --certificate-out certificate.json\n"
                    "       --node-selection best-bound|depth-first|best-estimate\n"
-                   "       --branching fractional|reliability --cuts\n       --primal-heuristic "
+                   "       --branching fractional|reliability|gnn [--branching-model w.json] --cuts\n       --primal-heuristic "
                    "repair|pump|rins|local|all\n"
                    "       --checkpoint-out state.json --checkpoint-nodes 100 --resume state.json\n"
                    "       --gpu-presolve --batch-strong-branching\n"
                    "       --auto (alias for --method auto) --dry-run\n"
+                   "       --history FILE (record outcome) --method learned (needs --history)\n"
                    "       halpern: experimental CPU/CUDA LP, requires --no-adaptive\n";
             return 0;
         }
@@ -122,6 +163,54 @@ int main(int argc, char **argv) {
         if (argc < 3)
             throw std::runtime_error("Model path required");
         if (cmd == "session") return run_session(argv[2]);
+        // Options shared by the analysis commands.
+        auto analysis_options = [&](int first, Options &o, std::string *history) {
+            for (int i = first; i < argc; ++i) {
+                std::string flag = argv[i];
+                if (i + 1 >= argc) throw std::runtime_error("Missing option value for " + flag);
+                std::string value = argv[++i];
+                if (flag == "--time-limit") o.time_limit = std::stod(value);
+                else if (flag == "--node-limit") o.node_limit = std::stoll(value);
+                else if (flag == "--mip-gap") o.mip_gap = std::stod(value);
+                else if (flag == "--tol") o.tol = std::stod(value);
+                else if (flag == "--method") o.method = value;
+                else if (flag == "--matrix-precision") o.matrix_precision = value;
+                else if (flag == "--history" && history) *history = value;
+                else throw std::runtime_error("Unsupported option for " + cmd + ": " + flag);
+            }
+        };
+        if (cmd == "train-branching") {
+            // niryukti train-branching OUTPUT.json MODEL... [--dives N --epochs N --seed N]
+            Options o;
+            o.time_limit = 600;
+            std::vector<std::string> paths;
+            int dives = 6, epochs = 60;
+            uint64_t seed = 1;
+            for (int i = 3; i < argc; ++i) {
+                std::string flag = argv[i];
+                if (flag.rfind("--", 0) != 0) { paths.push_back(flag); continue; }
+                if (i + 1 >= argc) throw std::runtime_error("Missing option value for " + flag);
+                std::string value = argv[++i];
+                if (flag == "--dives") dives = std::stoi(value);
+                else if (flag == "--epochs") epochs = std::stoi(value);
+                else if (flag == "--seed") seed = std::stoull(value);
+                else if (flag == "--time-limit") o.time_limit = std::stod(value);
+                else throw std::runtime_error("Unsupported option for train-branching: " + flag);
+            }
+            if (paths.empty() || dives < 1 || epochs < 1)
+                throw std::runtime_error("train-branching OUTPUT MODEL... [--dives N --epochs N]");
+            std::cout << nlohmann::json::parse(train_branching_json(paths, argv[2], o, dives, epochs, seed)).dump(2) << '\n';
+            return 0;
+        }
+        if (cmd == "global") {
+            Options o;
+            o.node_limit = 100000;
+            analysis_options(3, o, nullptr);
+            auto report = nlohmann::json::parse(global_solve_json(argv[2], o));
+            std::cout << report.dump(2) << '\n';
+            auto status = report.at("status").get<std::string>();
+            return status == "GLOBAL_OPTIMAL" || status == "INFEASIBLE" ? 0 : 2;
+        }
         auto parse_start = std::chrono::steady_clock::now();
         auto m = read_model(argv[2]);
         double parse_seconds =
@@ -243,6 +332,94 @@ int main(int argc, char **argv) {
             std::cout << j.dump(2) << '\n';
             return 0;
         }
+        if (cmd == "sensitivity") {
+            Options o;
+            o.method = "auto";
+            int first = 3;
+            std::vector<double> x;
+            bool given = argc > 3 && std::string(argv[3]).rfind("--", 0) != 0;
+            if (given) {
+                x = read_solution(m, argv[3]).x;
+                first = 4;
+            }
+            analysis_options(first, o, nullptr);
+            auto report = nlohmann::json::parse(sensitivity_json(m, o, given ? &x : nullptr));
+            std::cout << report.dump(2) << '\n';
+            return report.at("status") == "OPTIMAL_BASIS" ? 0 : 2;
+        }
+        if (cmd == "iis") {
+            Options o;
+            analysis_options(3, o, nullptr);
+            auto report = nlohmann::json::parse(iis_json(m, o));
+            std::cout << report.dump(2) << '\n';
+            return report.at("status") == "IIS_FOUND" ? 0 : 2;
+        }
+        if (cmd == "differentiate") {
+            Options o;
+            std::vector<double> upstream;
+            int samples = 0;
+            double sigma = 0.05;
+            uint64_t seed = 1;
+            for (int i = 3; i < argc; ++i) {
+                std::string flag = argv[i];
+                if (i + 1 >= argc) throw std::runtime_error("Missing option value for " + flag);
+                std::string value = argv[++i];
+                if (flag == "--upstream") {
+                    std::ifstream in(value);
+                    if (!in) throw std::runtime_error("Cannot read " + value);
+                    auto g = nlohmann::json::parse(in);
+                    if (g.is_array()) upstream = g.get<std::vector<double>>();
+                    else {
+                        upstream.assign(m.c.size(), 0.);
+                        for (auto it = g.begin(); it != g.end(); ++it) {
+                            auto at = std::find(m.names.begin(), m.names.end(), it.key());
+                            if (at == m.names.end()) throw std::runtime_error("Unknown variable " + it.key());
+                            upstream[at - m.names.begin()] = it.value().get<double>();
+                        }
+                    }
+                } else if (flag == "--samples") samples = std::stoi(value);
+                else if (flag == "--sigma") sigma = std::stod(value);
+                else if (flag == "--seed") seed = std::stoull(value);
+                else if (flag == "--time-limit") o.time_limit = std::stod(value);
+                else throw std::runtime_error("Unsupported option for differentiate: " + flag);
+            }
+            if (samples < 0 || samples > 10000 || !(sigma > 0))
+                throw std::runtime_error("Invalid --samples or --sigma");
+            auto report = nlohmann::json::parse(differentiate_json(m, o, upstream, samples, sigma, seed));
+            std::cout << report.dump(2) << '\n';
+            return report.at("status") == "OPTIMAL_BASIS" ? 0 : 2;
+        }
+        if (cmd == "decompose") {
+            Options o;
+            std::vector<std::string> linking;
+            bool detect_only = false;
+            for (int i = 3; i < argc; ++i) {
+                std::string flag = argv[i];
+                if (flag == "--detect-only") { detect_only = true; continue; }
+                if (i + 1 >= argc) throw std::runtime_error("Missing option value for " + flag);
+                std::string value = argv[++i];
+                if (flag == "--linking") {
+                    std::stringstream list(value);
+                    for (std::string name; std::getline(list, name, ',');)
+                        if (!name.empty()) linking.push_back(name);
+                } else if (flag == "--time-limit") o.time_limit = std::stod(value);
+                else if (flag == "--iterations") o.iteration_limit = std::stoll(value);
+                else if (flag == "--tol") o.tol = std::stod(value);
+                else throw std::runtime_error("Unsupported option for decompose: " + flag);
+            }
+            auto report = nlohmann::json::parse(decompose_json(m, o, linking, detect_only));
+            std::cout << report.dump(2) << '\n';
+            auto status = report.at("status").get<std::string>();
+            return status == "OPTIMAL" || status == "DETECTED" ? 0 : 2;
+        }
+        if (cmd == "recommend") {
+            Options o;
+            std::string history;
+            analysis_options(3, o, &history);
+            if (history.empty()) throw std::runtime_error("recommend requires --history FILE");
+            std::cout << nlohmann::json::parse(recommend_json(history, m, o)).dump(2) << '\n';
+            return 0;
+        }
         if (cmd == "convert") {
             if (argc != 4)
                 throw std::runtime_error("convert INPUT OUTPUT");
@@ -302,7 +479,7 @@ int main(int argc, char **argv) {
             throw std::runtime_error("Unknown command: " + cmd);
         Options o;
         o.method = "auto";
-        std::string output, warm, certificate_output;
+        std::string output, warm, certificate_output, history, learned_reason;
         bool allow_model_change = false, dry_run = false;
         for (int i = 3; i < argc; i++) {
             std::string a = argv[i];
@@ -343,6 +520,8 @@ int main(int argc, char **argv) {
                 o.node_selection = val();
             else if (a == "--branching")
                 o.branching = val();
+            else if (a == "--branching-model")
+                o.branching_model = val();
             else if (a == "--primal-weight")
                 o.primal_weight = val();
             else if (a == "--power-iterations")
@@ -359,6 +538,8 @@ int main(int argc, char **argv) {
                 o.gpu_indices = val();
             else if (a == "--matrix-precision")
                 o.matrix_precision = val();
+            else if (a == "--newton-precision")
+                o.newton_precision = val();
             else if (a == "--polishing")
                 o.polishing = true;
             else if (a == "--primal-heuristic")
@@ -377,6 +558,8 @@ int main(int argc, char **argv) {
                 o.checkpoint_nodes = std::stoll(val());
             else if (a == "--warm-start")
                 warm = val();
+            else if (a == "--history")
+                history = val();
             else if (a == "--allow-model-change")
                 allow_model_change = true;
             else if (a == "--verbose")
@@ -390,6 +573,13 @@ int main(int argc, char **argv) {
             else
                 throw std::runtime_error("Unknown option: " + a);
         }
+        bool learned = o.method == "learned";
+        if (learned) {
+            if (history.empty())
+                throw std::runtime_error("--method learned requires --history FILE");
+            auto method = learned_method(history, m, &learned_reason);
+            o.method = method.empty() ? "auto" : method;
+        }
         if (dry_run) {
             std::cout << analyze_model(m, o).dump(2) << '\n';
             return 0;
@@ -402,7 +592,12 @@ int main(int argc, char **argv) {
             o.basis_fingerprint = r.basis_fingerprint;
         }
         auto r = solve(m, o);
+        if (!history.empty())
+            record_history(history, m, o, r);
         auto j = nlohmann::json::parse(result_json(m, r));
+        j["assurance"] = assurance(m, r, o);
+        if (learned)
+            j["selection"]["learned"] = {{"method", o.method}, {"reason", learned_reason}};
         j["performance"]["parse_seconds"] = parse_seconds;
         j["selection"]["requested_method"] = o.method;
         j["selection"]["automatic"] = (o.method == "auto" || o.device == "auto");
@@ -427,6 +622,7 @@ int main(int argc, char **argv) {
                         {"gpu_monitor", o.gpu_monitor},
                         {"gpu_indices", o.gpu_indices},
                         {"matrix_precision", o.matrix_precision},
+                        {"newton_precision", o.newton_precision},
                         {"polishing", o.polishing},
                         {"cuts", o.cuts},
                         {"primal_heuristic", o.primal_heuristic},

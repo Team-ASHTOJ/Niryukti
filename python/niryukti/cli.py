@@ -1,11 +1,24 @@
 """Installed CLI: native optimization, local HTTP service and HTML reports."""
 import argparse
+import json
 import sys
 from vantage.cli import main as native_main
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in ("serve", "report"):
+    if len(sys.argv) < 2 or sys.argv[1] not in ("serve", "report", "translate"):
         return native_main()
+    if sys.argv[1] == "translate":
+        parser=argparse.ArgumentParser(prog="niryukti translate",
+                                       description="Offline controlled-English to JSON model")
+        parser.add_argument("spec");parser.add_argument("--output")
+        args=parser.parse_args(sys.argv[2:])
+        from vantage.language import translate_file, TranslationError
+        try:
+            _, report=translate_file(args.spec,args.output)
+        except TranslationError as error:
+            print(json.dumps(dict(status="ERROR",errors=[dict(line=n,message=m) for n,m in error.errors]),indent=2))
+            return 1
+        print(json.dumps(dict(status="TRANSLATED",output=args.output,**report),indent=2));return 0
     if sys.argv[1] == "report":
         parser=argparse.ArgumentParser(prog="niryukti report")
         parser.add_argument("result");parser.add_argument("--output",required=True)

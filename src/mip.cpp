@@ -1,3 +1,5 @@
+#include "gnn.hpp"
+#include <memory>
 #include "internal.hpp"
 #include "json.hpp"
 #include <array>
@@ -158,6 +160,9 @@ Result solve_mip(const Model &original, const Options &options) {
     }
     std::fill(relaxation.types.begin(), relaxation.types.end(), VarType::Continuous);
     const Model root_relaxation = relaxation;
+    std::unique_ptr<BranchingGnn> gnn;
+    if (options.branching == "gnn")
+        gnn = std::make_unique<BranchingGnn>(BranchingGnn::load(options.branching_model));
     Node root;
     root.lb = original.lb;
     root.ub = original.ub;
@@ -1163,6 +1168,19 @@ Result solve_mip(const Model &original, const Options &options) {
                     best_score = score;
                     branch = j;
                 }
+            }
+        }
+        if (gnn) {
+            // Learned scores over the bipartite constraint/variable graph of this node LP.
+            Model typed = relaxation;
+            typed.types = original.types;
+            auto graph = BranchingGnn::structure(typed);
+            BranchingGnn::features(graph, typed, r.x, r.y, options.integer_tol);
+            if (!graph.candidates.empty()) {
+                auto score = gnn->scores(graph);
+                auto best = std::max_element(score.begin(), score.end()) - score.begin();
+                if (std::isfinite(score[best]))
+                    branch = graph.candidates[best];
             }
         }
         double value = std::clamp(r.x[branch], node.lb[branch], node.ub[branch]);

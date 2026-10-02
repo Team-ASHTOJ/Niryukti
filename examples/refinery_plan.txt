@@ -1,0 +1,20 @@
+# Plain-English refinery blending plan for `niryukti translate`.
+# Synthetic numbers. Translate, review the echoed algebra, then solve:
+#   niryukti translate examples/refinery_plan.txt --output /tmp/plan.json
+#   niryukti solve /tmp/plan.json
+
+variables light_crude, heavy_crude, imported_crude between 0 and 400
+variables petrol, diesel
+binary run_hydrotreater
+
+property sulfur: light_crude 0.5, heavy_crude 2.8, imported_crude 1.6
+
+maximize 92 petrol + 88 diesel - 61 light_crude - 47 heavy_crude - 55 imported_crude - 900 run_hydrotreater
+
+cdu_capacity: light_crude + heavy_crude + imported_crude is at most 600
+petrol_yield: petrol <= 0.45 light_crude + 0.30 heavy_crude + 0.38 imported_crude
+diesel_yield: diesel <= 0.40 light_crude + 0.50 heavy_crude + 0.45 imported_crude
+petrol_demand: petrol is between 120 and 220
+diesel_demand: diesel must be at least 150
+sulfur_spec: average sulfur of light_crude, heavy_crude, imported_crude at most 1.4
+heavy_needs_treater: heavy_crude <= 400 run_hydrotreater

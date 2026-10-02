@@ -38,3 +38,7 @@ VANTAGE_BINARY="${1:-build}/vantage" NIRYUKTI_LIBRARY="${1:-build}/libniryukti_c
 NIRYUKTI_BINARY="${1:-build}/niryukti" python3 tests/test_conflict_learning.py
 
 NIRYUKTI_BINARY="${1:-build}/niryukti" python3 tests/test_engine_checkpoints.py
+
+NIRYUKTI_BINARY="${1:-build}/niryukti" python3 tests/test_analysis.py
+
+NIRYUKTI_BINARY="${1:-build}/niryukti" python3 tests/test_advanced.py

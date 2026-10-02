@@ -962,6 +962,12 @@ std::string result_json(const Model &m, const Result &r) {
     j["gpu_execution"] = {{"index_bits", r.gpu_index_bits},
                           {"cuda_graphs", r.graph_execution},
                           {"matrix_precision", r.matrix_precision}};
+    if (r.mixed_precision_solves || r.precision_fallbacks)
+        j["mixed_precision"] = {{"refined_solves", r.mixed_precision_solves},
+                                {"refinement_steps", r.refinement_steps},
+                                {"fp64_fallbacks", r.precision_fallbacks},
+                                {"worst_relative_residual", r.worst_refined_residual},
+                                {"scheme", "FP32 Newton factor/operator, FP64 residual refinement"}};
     if (!r.infeasibility_ray.empty())
         j["certificate"] = {{"kind", "BOX_ROW_FARKAS"},
                             {"dual_ray", r.infeasibility_ray},

@@ -1,0 +1,15 @@
+{
+  "name": "infeasible_sulfur_blend",
+  "description": "Synthetic conflict: 120 units of fuel are required, light crude supply is capped at 50, and heavy crude (3% sulfur) can make up at most a quarter of the light volume to meet a 1% sulfur specification. Run `niryukti iis` to isolate the three conflicting requirements.",
+  "sense": "min",
+  "variables": [
+    {"name": "light_crude", "lb": 0, "ub": 50},
+    {"name": "heavy_crude", "lb": 0, "ub": 150}
+  ],
+  "objective": {"linear": [8, 5]},
+  "constraints": [
+    {"name": "fuel_demand", "lb": 120, "coefficients": {"light_crude": 1, "heavy_crude": 1}},
+    {"name": "sulfur_spec", "ub": 0, "coefficients": {"light_crude": -0.5, "heavy_crude": 2}},
+    {"name": "cdu_capacity", "ub": 200, "coefficients": {"light_crude": 1, "heavy_crude": 1}}
+  ]
+}

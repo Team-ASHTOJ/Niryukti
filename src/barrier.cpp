@@ -1,6 +1,7 @@
 #include "checkpoint.hpp"
 #include "internal.hpp"
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #ifdef VANTAGE_SPARSE_LU
 #include <Eigen/SparseLU>
@@ -238,29 +239,106 @@ Result solve_barrier(const Model &original, const Options &o) {
                 kt.emplace_back(n + i, n + i, -1e-12);
             Matrix kkt(n + equalities, n + equalities);
             kkt.setFromTriplets(kt.begin(), kt.end());
+            // Mixed-precision iterative refinement (Wilkinson; Carson & Higham 2018): factor
+            // or apply the KKT operator in FP32, compute residuals against the FP64 matrix and
+            // accumulate corrections in FP64. Non-convergence falls back to the FP64 path.
+            const bool mixed = o.newton_precision == "mixed";
+            using MatrixF = Eigen::SparseMatrix<float>;
             Eigen::SparseLU<Matrix> factor;
-            if (!gpu)
+            Eigen::SparseLU<MatrixF> factor32;
+            bool have64 = false, have32 = false;
+            auto ensure64 = [&]() {
+                if (have64)
+                    return;
                 factor.compute(kkt);
-            if (!gpu && factor.info() != Eigen::Success)
-                throw std::runtime_error("Barrier Newton factorization failed");
+                if (factor.info() != Eigen::Success)
+                    throw std::runtime_error("Barrier Newton factorization failed");
+                have64 = true;
+            };
+            if (!gpu && mixed) {
+                bool representable = true;
+                for (int col = 0; col < kkt.outerSize() && representable; ++col)
+                    for (Matrix::InnerIterator k(kkt, col); k; ++k) {
+                        float f = float(k.value());
+                        if (!std::isfinite(f) || (k.value() != 0 && f == 0)) {
+                            representable = false;
+                            break;
+                        }
+                    }
+                if (representable) {
+                    MatrixF low = kkt.cast<float>();
+                    factor32.compute(low);
+                    have32 = factor32.info() == Eigen::Success;
+                }
+                if (!have32)
+                    ++result.precision_fallbacks;
+            }
+            if (!gpu && !have32)
+                ensure64();
+            std::unique_ptr<Sparse> device_matrix;
+            if (gpu) {
+                std::vector<Entry> entries;
+                for (int col = 0; col < kkt.outerSize(); ++col)
+                    for (Matrix::InnerIterator k(kkt, col); k; ++k)
+                        entries.push_back({k.row(), k.col(), k.value()});
+                device_matrix = std::make_unique<Sparse>(
+                    Sparse::build(kkt.rows(), kkt.cols(), std::move(entries)));
+            }
+            auto gpu_solve = [&](const Vector &b, bool fp32) {
+                auto budget = o;
+                budget.time_limit = std::max(0., o.time_limit - elapsed(start));
+                auto answer =
+                    cuda_linear_solve(*device_matrix, std::vector<double>(b.data(), b.data() + b.size()),
+                                      budget, fp32, fp32 ? 1e-2 : 1e-7);
+                return Vector(Eigen::Map<Vector>(answer.data(), answer.size()));
+            };
+            auto refined = [&](const Vector &rhs) {
+                ++result.mixed_precision_solves;
+                auto inner = [&](const Vector &b) -> Vector {
+                    if (gpu)
+                        return gpu_solve(b, true);
+                    Eigen::VectorXf low = b.cast<float>();
+                    Eigen::VectorXf answer = factor32.solve(low);
+                    return answer.cast<double>();
+                };
+                double scale = 1 + rhs.lpNorm<Eigen::Infinity>();
+                try {
+                    Vector solution = inner(rhs);
+                    double previous = inf;
+                    for (int step = 0; step < 30 && solution.allFinite(); ++step) {
+                        Vector residual = rhs - kkt * solution;
+                        double norm = residual.lpNorm<Eigen::Infinity>();
+                        if (norm <= 1e-12 * scale) {
+                            result.worst_refined_residual =
+                                std::max(result.worst_refined_residual, norm / scale);
+                            return solution;
+                        }
+                        if (!(norm < previous))
+                            break; // contraction lost: FP32 conditioning limit reached
+                        previous = norm;
+                        solution += inner(residual);
+                        ++result.refinement_steps;
+                    }
+                } catch (const std::exception &) {
+                    // Inner FP32 GPU breakdown: use the FP64 path below.
+                }
+                ++result.precision_fallbacks;
+                if (gpu)
+                    return gpu_solve(rhs, false);
+                ensure64();
+                return Vector(factor.solve(rhs));
+            };
             auto direction = [&](const Vector &rc, Vector &dx, Vector &dy, Vector &ds, Vector &dz) {
                 Vector rhs(n + equalities);
                 rhs.head(n) =
                     -rd + g.transpose() * ((rc - z.cwiseProduct(rg)).cwiseQuotient(slack));
                 rhs.tail(equalities) = -rp;
                 Vector solution;
-                if (gpu) {
-                    std::vector<Entry> entries;
-                    for (int col = 0; col < kkt.outerSize(); ++col)
-                        for (Matrix::InnerIterator k(kkt, col); k; ++k)
-                            entries.push_back({k.row(), k.col(), k.value()});
-                    auto sparse = Sparse::build(kkt.rows(), kkt.cols(), std::move(entries));
-                    auto budget = o;
-                    budget.time_limit = std::max(0., o.time_limit - elapsed(start));
-                    auto answer = cuda_linear_solve(
-                        sparse, std::vector<double>(rhs.data(), rhs.data() + rhs.size()), budget);
-                    solution = Eigen::Map<Vector>(answer.data(), answer.size());
-                } else
+                if (mixed && (gpu || have32))
+                    solution = refined(rhs);
+                else if (gpu)
+                    solution = gpu_solve(rhs, false);
+                else
                     solution = factor.solve(rhs);
                 if (!solution.allFinite())
                     throw std::runtime_error("Nonfinite barrier Newton direction");
@@ -269,6 +347,7 @@ Result solve_barrier(const Model &original, const Options &o) {
                     if (gpu)
                         throw std::runtime_error(
                             "GPU Newton direction residual exceeds barrier threshold");
+                    ensure64();
                     Vector correction = factor.solve(rhs - kkt * solution);
                     solution += correction;
                     if (!solution.allFinite() || (kkt * solution - rhs).lpNorm<Eigen::Infinity>() >

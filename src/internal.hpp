@@ -44,7 +44,10 @@ Sparse cuda_compact_matrix(const Sparse &, const std::vector<int64_t> &,
 Prepared prepare(const Model &, const Options &);
 int64_t simplex_row_limit();
 Result solve_simplex(const Model &, const Options &);
-std::vector<double> cuda_linear_solve(const Sparse &, const std::vector<double> &, const Options &);
+// fp32_matrix: FP32 coefficients with FP64 vectors (same cuSPARSE configuration as mixed
+// PDHG); the caller refines against the FP64 matrix, so only `tolerance` is enforced here.
+std::vector<double> cuda_linear_solve(const Sparse &, const std::vector<double> &, const Options &,
+                                      bool fp32_matrix = false, double tolerance = 1e-7);
 Result solve_barrier(const Model &, const Options &);
 Result solve_portfolio(const Model &, const Options &);
 double power_norm(const Sparse &, int iterations);

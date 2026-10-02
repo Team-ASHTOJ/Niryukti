@@ -16,7 +16,7 @@ std::vector<Result> cuda_batch_relaxations(const Model &, const std::vector<std:
     throw std::runtime_error("Batched relaxations require a CUDA build");
 }
 std::vector<double> cuda_linear_solve(const Sparse &, const std::vector<double> &,
-                                      const Options &) {
+                                      const Options &, bool, double) {
     throw std::runtime_error("GPU Newton solve requires CUDA");
 }
 Hardware hardware_info() {

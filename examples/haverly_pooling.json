@@ -1,0 +1,36 @@
+{
+  "name": "haverly_pooling_1",
+  "description": "Haverly (1978) pooling problem 1. Crudes A (3% sulfur, $6) and B (1%, $16) share one pool; crude C (2%, $10) bypasses it. Product X sells at $9 (<=100 units, <=2.5% sulfur) and Y at $15 (<=200 units, <=1.5% sulfur). The pool sulfur quality q multiplies pool outflows, so the sulfur balances are bilinear. Known global optimum: profit 400; a well-known local optimum earns 100.",
+  "sense": "max",
+  "variables": [
+    {"name": "crude_a", "lb": 0, "ub": 300},
+    {"name": "crude_b", "lb": 0, "ub": 300},
+    {"name": "pool_to_x", "lb": 0, "ub": 100},
+    {"name": "pool_to_y", "lb": 0, "ub": 200},
+    {"name": "crude_c_to_x", "lb": 0, "ub": 100},
+    {"name": "crude_c_to_y", "lb": 0, "ub": 200},
+    {"name": "pool_sulfur", "lb": 1, "ub": 3}
+  ],
+  "objective": {
+    "linear": {
+      "crude_a": -6, "crude_b": -16,
+      "pool_to_x": 9, "pool_to_y": 15,
+      "crude_c_to_x": -1, "crude_c_to_y": 5
+    }
+  },
+  "constraints": [
+    {"name": "pool_mass_balance", "lb": 0, "ub": 0,
+     "coefficients": {"crude_a": 1, "crude_b": 1, "pool_to_x": -1, "pool_to_y": -1}},
+    {"name": "pool_sulfur_balance", "lb": 0, "ub": 0,
+     "coefficients": {"crude_a": -3, "crude_b": -1},
+     "bilinear": [["pool_sulfur", "pool_to_x", 1], ["pool_sulfur", "pool_to_y", 1]]},
+    {"name": "demand_x", "ub": 100, "coefficients": {"pool_to_x": 1, "crude_c_to_x": 1}},
+    {"name": "demand_y", "ub": 200, "coefficients": {"pool_to_y": 1, "crude_c_to_y": 1}},
+    {"name": "sulfur_spec_x", "ub": 0,
+     "coefficients": {"pool_to_x": -2.5, "crude_c_to_x": -0.5},
+     "bilinear": [["pool_sulfur", "pool_to_x", 1]]},
+    {"name": "sulfur_spec_y", "ub": 0,
+     "coefficients": {"pool_to_y": -1.5, "crude_c_to_y": 0.5},
+     "bilinear": [["pool_sulfur", "pool_to_y", 1]]}
+  ]
+}

@@ -480,6 +480,9 @@ class CompressedStorageIterator {
     return *this;
   }
   inline reference operator*() const { return reference(m_data.keyPtr() + m_index, m_data.valuePtr() + m_index); }
+  // NIRYUKTI compatibility patch: libc++ >= 21 heap algorithms (std::partial_sort via
+  // __sift_down) require the random-access subscript operator, as in later Eigen releases.
+  inline reference operator[](difference_type offset) const { return *(*this + offset); }
 
 #define MAKE_COMP(OP) \
   inline bool operator OP(const CompressedStorageIterator& other) const { return m_index OP other.m_index; }
